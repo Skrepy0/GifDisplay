@@ -2,356 +2,416 @@
 using UnityEngine;
 using UnityEngine.UI;
 using System.IO;
+using System.Collections.Generic;
 using Newtonsoft.Json;
 
 namespace GifDisplay
 {
-    public class SettingsData
+  public class SettingsData
+  {
+    public float PosX;
+    public float PosY;
+    public float Scale = 1.0f;
+    public float Opacity = 1.0f;
+    public string PicGifPath = "";
+  }
+
+  public class ImageInstance
+  {
+    public GameObject GameObject;
+    public Display Display;
+    public SettingsData Settings;
+
+    public string PosXStr;
+    public string PosYStr;
+    public string ScaleStr;
+    public string OpacityStr;
+
+    public bool ConfirmDelete;
+
+    public ImageInstance(SettingsData data)
     {
-        public float posX = 100f;
-        public float posY = 100f;
-        public float scale = 1.0f;
-        public float opacity = 1.0f;
-        public string gifPath = "";
+      Settings = data;
+      UpdateStrings();
     }
 
-    public class Main
+    public void UpdateStrings()
     {
-        private static UnityModManager.ModEntry modEntry;
-        private static GameObject gifObject;
-        private static Display display;
+      PosXStr = Settings.PosX.ToString("F1") + "%";
+      PosYStr = Settings.PosY.ToString("F1") + "%";
+      ScaleStr = Settings.Scale.ToString("F2");
+      OpacityStr = Settings.Opacity.ToString("F2");
+    }
+  }
 
-        private static float posX = 100f;
-        private static float posY = 100f;
-        private static float scale = 1.0f;
-        private static float opacity = 1.0f;
-        private static string gifPath = "";
-        private static string settingsPath;
+  public class Main
+  {
+    private static UnityModManager.ModEntry modEntry;
+    private static GameObject canvasObject;
+    private static List<ImageInstance> instances = new();
+    private static string settingsPath;
 
-        private static string posXStr = "100", posYStr = "100", scaleStr = "1.00", opacityStr = "1.00";
+    private static string newImagePath = "";
 
-        public static bool Load(UnityModManager.ModEntry entry)
+    private static int lastScreenWidth;
+    private static int lastScreenHeight;
+
+    public static bool Load(UnityModManager.ModEntry entry)
+    {
+      modEntry = entry;
+      settingsPath = Path.Combine(entry.Path, "settings.json");
+
+      Display.LogErrorCallback = (msg) => modEntry.Logger.Log(msg);
+
+      entry.OnToggle = OnToggle;
+      entry.OnGUI = OnGUI;
+      entry.OnUpdate = OnUpdate;
+      entry.OnUnload = OnUnload;
+
+      if (!CreateCanvas())
+      {
+        modEntry.Logger.Log("Failed to create Canvas");
+        return false;
+      }
+
+      lastScreenWidth = Screen.width;
+      lastScreenHeight = Screen.height;
+
+      LoadSettings();
+
+      if (instances.Count == 0)
+      {
+        var defaultData = new SettingsData { PicGifPath = "", PosX = 0, PosY = 0, Scale = 1f, Opacity = 1f };
+        CreateInstance(defaultData);
+        SaveSettings();
+      }
+
+      modEntry.Logger.Log($"GifDisplay Mod loaded with {instances.Count} instances");
+      return true;
+    }
+
+    private static bool OnToggle(UnityModManager.ModEntry entry, bool enable)
+    {
+      if (canvasObject != null)
+        canvasObject.SetActive(enable);
+      return true;
+    }
+
+    private static void OnUpdate(UnityModManager.ModEntry entry, float delta)
+    {
+      if (Screen.width != lastScreenWidth || Screen.height != lastScreenHeight)
+      {
+        lastScreenWidth = Screen.width;
+        lastScreenHeight = Screen.height;
+        UpdateAllInstances();
+      }
+    }
+
+    private static bool OnUnload(UnityModManager.ModEntry entry)
+    {
+      foreach (var inst in instances)
+      {
+        if (inst.GameObject != null)
+          GameObject.Destroy(inst.GameObject);
+      }
+
+      instances.Clear();
+
+      if (canvasObject != null)
+        GameObject.Destroy(canvasObject);
+
+      return true;
+    }
+
+    private static void OnGUI(UnityModManager.ModEntry entry)
+    {
+      if (!modEntry.Active) return;
+
+      GUILayout.BeginVertical("box", GUILayout.Width(800));
+
+      GUILayout.Label("Add New Image", GUILayout.Width(150));
+      GUILayout.BeginHorizontal();
+      GUILayout.Label("Path:", GUILayout.Width(50));
+      newImagePath = GUILayout.TextField(newImagePath, GUILayout.Width(400));
+      if (GUILayout.Button("Add", GUILayout.Width(80)))
+      {
+        if (!string.IsNullOrEmpty(newImagePath) && File.Exists(newImagePath))
         {
-            modEntry = entry;
-            settingsPath = Path.Combine(entry.Path, "settings.json");
-            LoadSettings();
+          var data = new SettingsData
+          {
+            PicGifPath = newImagePath,
+            PosX = 0f,
+            PosY = 0f,
+            Scale = 1f,
+            Opacity = 1f
+          };
+          if (instances.Count > 0)
+          {
+            data.PosX = Mathf.Clamp(instances[instances.Count - 1].Settings.PosX + 10, -100, 100);
+            data.PosY = Mathf.Clamp(instances[instances.Count - 1].Settings.PosY + 10, -100, 100);
+          }
 
-            Display.LogErrorCallback = (msg) => modEntry.Logger.Log(msg);
+          CreateInstance(data);
+          SaveSettings();
+          newImagePath = "";
+        }
+        else
+        {
+          modEntry.Logger.Log("Invalid file path: " + newImagePath);
+        }
+      }
 
-            entry.OnToggle = OnToggle;
-            entry.OnGUI = OnGUI;
-            entry.OnUpdate = OnUpdate;
+      GUILayout.EndHorizontal();
 
-            if (!CreateGifUI())
-            {
-                modEntry.Logger.Log("Failed to create GIF UI, mod will not load.");
-                return false;
-            }
+      for (int i = 0; i < instances.Count; i++)
+      {
+        var inst = instances[i];
+        var settings = inst.Settings;
+        bool changed = false;
 
-            display.OnGifLoaded += OnGifLoaded;
+        GUILayout.BeginVertical("box");
+        GUILayout.Label($"Image #{i + 1}");
 
-            UpdateGifTransform();
-            LoadGifFromPath();
-
-            return true;
+        // 路径 + 重载
+        GUILayout.BeginHorizontal();
+        GUILayout.Label("Path:", GUILayout.Width(50));
+        GUILayout.Label(settings.PicGifPath, GUILayout.Width(400));
+        if (GUILayout.Button("Reload", GUILayout.Width(120)))
+        {
+          inst.Display.localPath = settings.PicGifPath;
+          inst.Display.Reload(true);
+          inst.ConfirmDelete = false; // 重置确认状态
         }
 
-        private static bool OnToggle(UnityModManager.ModEntry entry, bool enable)
-        {
-            if (enable)
-            {
-                if (gifObject == null)
-                {
-                    CreateGifUI();
-                    UpdateGifTransform();
-                    LoadGifFromPath();
-                }
-                else
-                {
-                    gifObject.SetActive(true);
-                }
-            }
-            else
-            {
-                if (gifObject != null)
-                    gifObject.SetActive(false);
-            }
+        GUILayout.EndHorizontal();
 
-            return true;
+        // ---- X 滑块（-100 ~ 100） ----
+        GUILayout.BeginHorizontal();
+        GUILayout.Label("X (%)", GUILayout.Width(80));
+        float newX = GUILayout.HorizontalSlider(settings.PosX, -100f, 100f, GUILayout.Width(200));
+        if (newX != settings.PosX)
+        {
+          settings.PosX = newX;
+          inst.PosXStr = newX.ToString("F1") + "%";
+          changed = true;
         }
 
-        private static void OnUpdate(UnityModManager.ModEntry entry, float delta)
+        GUILayout.Label(inst.PosXStr, GUILayout.Width(120));
+        GUILayout.EndHorizontal();
+
+        // ---- Y 滑块（-100 ~ 100） ----
+        GUILayout.BeginHorizontal();
+        GUILayout.Label("Y (%)", GUILayout.Width(80));
+        float newY = GUILayout.HorizontalSlider(settings.PosY, -100f, 100f, GUILayout.Width(200));
+        if (newY != settings.PosY)
         {
+          settings.PosY = newY;
+          inst.PosYStr = newY.ToString("F1") + "%";
+          changed = true;
         }
 
-        private static void OnGUI(UnityModManager.ModEntry entry)
+        GUILayout.Label(inst.PosYStr, GUILayout.Width(120));
+        GUILayout.EndHorizontal();
+
+        // ---- Scale ----
+        GUILayout.BeginHorizontal();
+        GUILayout.Label("Scale", GUILayout.Width(80));
+        float newScale = GUILayout.HorizontalSlider(settings.Scale, 0.1f, 3f, GUILayout.Width(200));
+        if (newScale != settings.Scale)
         {
-            if (!modEntry.Active) return;
+          settings.Scale = newScale;
+          inst.ScaleStr = newScale.ToString("F2");
+          changed = true;
+        }
 
-            bool changed = false;
+        GUILayout.Label(inst.ScaleStr, GUILayout.Width(60));
+        GUILayout.EndHorizontal();
 
-            GUILayout.BeginVertical("box", GUILayout.Width(750));
+        // ---- Opacity ----
+        GUILayout.BeginHorizontal();
+        GUILayout.Label("Opacity", GUILayout.Width(80));
+        float newOpacity = GUILayout.HorizontalSlider(settings.Opacity, 0f, 1f, GUILayout.Width(200));
+        if (newOpacity != settings.Opacity)
+        {
+          settings.Opacity = newOpacity;
+          inst.OpacityStr = newOpacity.ToString("F2");
+          changed = true;
+        }
 
-            // GIF 路径
-            GUILayout.BeginHorizontal();
-            GUILayout.Label("GIF Path", GUILayout.Width(150));
-            string newPath = GUILayout.TextField(gifPath, GUILayout.Width(280));
-            if (newPath != gifPath)
-            {
-                gifPath = newPath;
-                changed = true;
-            }
+        GUILayout.Label(inst.OpacityStr, GUILayout.Width(60));
+        GUILayout.EndHorizontal();
 
-            if (GUILayout.Button("Load", GUILayout.Width(150)))
-            {
-                if (display != null)
-                {
-                    display.localPath = gifPath;
-                    display.Reload(true);
-                }
+        // ---------- 删除按钮 ----------
+        if (changed)
+          inst.ConfirmDelete = false; // 参数改变时重置确认状态
 
-                SaveSettings();
-            }
+        Color oldColor = GUI.backgroundColor;
+        GUI.backgroundColor = Color.red;
 
-            GUILayout.EndHorizontal();
-
-            GUILayout.BeginHorizontal();
-            GUILayout.Label("X (px)", GUILayout.Width(150));
-            string newXStr = GUILayout.TextField(posXStr, GUILayout.Width(100));
-            if (newXStr != posXStr)
-            {
-                if (float.TryParse(newXStr, out float newX))
-                {
-                    posX = newX;
-                    posXStr = posX.ToString("F0");
-                    changed = true;
-                }
-                else
-                {
-                    posXStr = posX.ToString("F0");
-                }
-            }
-
-            GUILayout.FlexibleSpace();
-            GUILayout.EndHorizontal();
-
-            GUILayout.BeginHorizontal();
-            GUILayout.Label("Y (px)", GUILayout.Width(150));
-            string newYStr = GUILayout.TextField(posYStr, GUILayout.Width(100));
-            if (newYStr != posYStr)
-            {
-                if (float.TryParse(newYStr, out float newY))
-                {
-                    posY = newY; 
-                    posYStr = posY.ToString("F0");
-                    changed = true;
-                }
-                else
-                {
-                    posYStr = posY.ToString("F0");
-                }
-            }
-
-            GUILayout.FlexibleSpace();
-            GUILayout.EndHorizontal();
-
-            // 缩放
-            GUILayout.BeginHorizontal();
-            GUILayout.Label("Scale", GUILayout.Width(150));
-            float newScale = GUILayout.HorizontalSlider(scale, 0.1f, 3f, GUILayout.Width(200));
-            if (newScale != scale)
-            {
-                scale = newScale;
-                scaleStr = scale.ToString("F2");
-                changed = true;
-            }
-
-            GUILayout.Label(scaleStr, GUILayout.Width(120));
-            GUILayout.EndHorizontal();
-
-            // 透明度
-            GUILayout.BeginHorizontal();
-            GUILayout.Label("Opacity", GUILayout.Width(150));
-            float newOpacity = GUILayout.HorizontalSlider(opacity, 0f, 1f, GUILayout.Width(200));
-            if (newOpacity != opacity)
-            {
-                opacity = newOpacity;
-                opacityStr = opacity.ToString("F2");
-                changed = true;
-            }
-
-            GUILayout.Label(opacityStr, GUILayout.Width(120));
-            GUILayout.EndHorizontal();
-
+        string deleteText = inst.ConfirmDelete ? "Confirm?" : "Delete";
+        if (GUILayout.Button(deleteText, GUILayout.Width(150)))
+        {
+          if (inst.ConfirmDelete)
+          {
+            if (inst.GameObject != null)
+              GameObject.Destroy(inst.GameObject);
+            instances.RemoveAt(i);
+            SaveSettings();
             GUILayout.EndVertical();
+            break;
+          }
 
-            if (changed)
-            {
-                UpdateGifTransform();
-                SaveSettings();
-            }
+          inst.ConfirmDelete = true;
         }
 
-        // ---------- UI 创建 ----------
-        private static bool CreateGifUI()
+        GUI.backgroundColor = oldColor;
+
+        GUILayout.EndVertical();
+
+        if (changed)
         {
-            try
-            {
-                if (gifObject != null) return true;
-
-                modEntry.Logger.Log("Creating GIF UI...");
-
-                var canvasObj = new GameObject("GifCanvas");
-                canvasObj.SetActive(true);
-                var canvas = canvasObj.AddComponent<Canvas>();
-                if (canvas == null)
-                {
-                    modEntry.Logger.Log("Failed to add Canvas component");
-                    return false;
-                }
-
-                canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-                canvas.sortingOrder = 999;
-                GameObject.DontDestroyOnLoad(canvasObj);
-                modEntry.Logger.Log("Canvas created");
-
-                gifObject = new GameObject("GifImage");
-                gifObject.transform.SetParent(canvasObj.transform, false);
-                var rect = gifObject.GetComponent<RectTransform>();
-                if (rect == null)
-                {
-                    rect = gifObject.AddComponent<RectTransform>();
-                    if (rect == null)
-                    {
-                        modEntry.Logger.Log("Failed to add RectTransform component");
-                        return false;
-                    }
-                }
-
-                // 锚点左上角
-                rect.anchorMin = new Vector2(0, 1);
-                rect.anchorMax = new Vector2(0, 1);
-                rect.pivot = new Vector2(0, 1);
-                rect.anchoredPosition = new Vector2(posX, posY);
-                rect.sizeDelta = new Vector2(150, 150);
-
-                var rawImage = gifObject.AddComponent<RawImage>();
-                if (rawImage == null)
-                {
-                    modEntry.Logger.Log("Failed to add RawImage component");
-                    return false;
-                }
-
-                rawImage.raycastTarget = false;
-                rawImage.color = new Color(1, 1, 1, opacity);
-
-                display = gifObject.AddComponent<Display>();
-                if (display == null)
-                {
-                    modEntry.Logger.Log("Failed to add GifDisplay component");
-                    return false;
-                }
-
-                display.rawImage = rawImage;
-                modEntry.Logger.Log("GifDisplay added and connected");
-
-                gifObject.SetActive(true);
-                modEntry.Logger.Log("GIF UI creation successful");
-                return true;
-            }
-            catch (System.Exception ex)
-            {
-                modEntry.Logger.Log($"CreateGifUI exception: {ex.Message}\n{ex.StackTrace}");
-                return false;
-            }
+          UpdateInstanceTransform(inst);
+          SaveSettings();
         }
+      }
 
-        private static void OnGifLoaded()
-        {
-            UpdateGifTransform();
-        }
-
-        private static void LoadGifFromPath()
-        {
-            if (display != null)
-            {
-                display.localPath = gifPath;
-                display.Reload(true);
-            }
-        }
-
-        private static void UpdateGifTransform()
-        {
-            if (gifObject == null || display == null) return;
-
-            var rect = gifObject.GetComponent<RectTransform>();
-            var rawImage = gifObject.GetComponent<RawImage>();
-
-            // 位置（支持负值，直接设置 anchoredPosition）
-            rect.anchoredPosition = new Vector2(posX, posY);
-
-            // 尺寸：根据原始宽高比和缩放
-            if (display.GifWidth > 0 && display.GifHeight > 0)
-            {
-                float baseHeight = 150f * scale;
-                float aspect = (float)display.GifWidth / display.GifHeight;
-                float width = baseHeight * aspect;
-                float height = baseHeight;
-                rect.sizeDelta = new Vector2(width, height);
-            }
-            else
-            {
-                rect.sizeDelta = new Vector2(150 * scale, 150 * scale);
-            }
-
-            // 透明度
-            if (rawImage != null)
-            {
-                Color c = rawImage.color;
-                c.a = opacity;
-                rawImage.color = c;
-            }
-        }
-
-        // ---------- 设置持久化 ----------
-        private static void SaveSettings()
-        {
-            if (string.IsNullOrEmpty(settingsPath)) return;
-            var settings = new SettingsData
-            {
-                posX = posX,
-                posY = posY,
-                scale = scale,
-                opacity = opacity,
-                gifPath = gifPath
-            };
-            string json = JsonConvert.SerializeObject(settings, Formatting.Indented);
-            File.WriteAllText(settingsPath, json);
-        }
-
-        private static void LoadSettings()
-        {
-            if (!File.Exists(settingsPath)) return;
-            try
-            {
-                string json = File.ReadAllText(settingsPath);
-                var settings = JsonConvert.DeserializeObject<SettingsData>(json);
-                if (settings != null)
-                {
-                    posX = settings.posX;
-                    posY = settings.posY;
-                    scale = settings.scale;
-                    opacity = settings.opacity;
-                    gifPath = settings.gifPath ?? "";
-                    posXStr = posX.ToString("F0");
-                    posYStr = posY.ToString("F0");
-                    scaleStr = scale.ToString("F2");
-                    opacityStr = opacity.ToString("F2");
-                }
-            }
-            catch
-            {
-            }
-        }
+      GUILayout.EndVertical();
     }
+
+    // ---------- 创建 Canvas ----------
+    private static bool CreateCanvas()
+    {
+      if (canvasObject != null) return true;
+
+      canvasObject = new GameObject("GifDisplayCanvas");
+      canvasObject.SetActive(true);
+      var canvas = canvasObject.AddComponent<Canvas>();
+      if (canvas == null)
+      {
+        modEntry.Logger.Log("Failed to add Canvas");
+        return false;
+      }
+
+      canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+      canvas.sortingOrder = 999;
+      GameObject.DontDestroyOnLoad(canvasObject);
+      return true;
+    }
+
+    // ---------- 创建单个实例 ----------
+    private static void CreateInstance(SettingsData data)
+    {
+      if (canvasObject == null) return;
+
+      var inst = new ImageInstance(data);
+
+      var go = new GameObject("GifImage");
+      go.transform.SetParent(canvasObject.transform, false);
+      var rect = go.AddComponent<RectTransform>();
+
+      rect.anchorMin = new Vector2(0.5f, 0.5f);
+      rect.anchorMax = new Vector2(0.5f, 0.5f);
+      rect.pivot = new Vector2(0.5f, 0.5f);
+
+      var rawImage = go.AddComponent<RawImage>();
+      rawImage.raycastTarget = false;
+
+      var display = go.AddComponent<Display>();
+      display.rawImage = rawImage;
+
+      inst.GameObject = go;
+      inst.Display = display;
+
+      display.OnGifLoaded += () => UpdateInstanceTransform(inst);
+
+      display.localPath = data.PicGifPath;
+      display.Reload(true);
+
+      UpdateInstanceTransform(inst);
+
+      instances.Add(inst);
+    }
+
+    // ---------- 更新单个实例的 Transform ----------
+    private static void UpdateInstanceTransform(ImageInstance inst)
+    {
+      if (ReferenceEquals(inst.GameObject, null) || ReferenceEquals(inst.Display, null)) return;
+
+      var rect = inst.GameObject.GetComponent<RectTransform>();
+      var rawImage = inst.GameObject.GetComponent<RawImage>();
+
+      float halfWidth = Screen.width / 2f;
+      float halfHeight = Screen.height / 2f;
+      float xPos = (inst.Settings.PosX / 100f) * halfWidth;
+      float yPos = (inst.Settings.PosY / 100f) * halfHeight;
+      rect.anchoredPosition = new Vector2(xPos, yPos);
+
+      if (inst.Display.gifWidth > 0 && inst.Display.gifHeight > 0)
+      {
+        float width = inst.Display.gifWidth * inst.Settings.Scale;
+        float height = inst.Display.gifHeight * inst.Settings.Scale;
+        rect.sizeDelta = new Vector2(width, height);
+      }
+      else
+      {
+        rect.sizeDelta = new Vector2(150 * inst.Settings.Scale, 150 * inst.Settings.Scale);
+      }
+
+      if (!ReferenceEquals(rawImage, null))
+      {
+        Color c = rawImage.color;
+        c.a = inst.Settings.Opacity;
+        rawImage.color = c;
+      }
+    }
+
+    private static void UpdateAllInstances()
+    {
+      foreach (var inst in instances)
+        UpdateInstanceTransform(inst);
+    }
+
+    private static void SaveSettings()
+    {
+      if (string.IsNullOrEmpty(settingsPath)) return;
+
+      var list = new List<SettingsData>();
+      foreach (var inst in instances)
+        list.Add(inst.Settings);
+
+      string json = JsonConvert.SerializeObject(list, Formatting.Indented);
+      File.WriteAllText(settingsPath, json);
+    }
+
+    private static void LoadSettings()
+    {
+      if (!File.Exists(settingsPath)) return;
+
+      try
+      {
+        string json = File.ReadAllText(settingsPath);
+        var list = JsonConvert.DeserializeObject<List<SettingsData>>(json);
+        if (list != null)
+        {
+          foreach (var data in list)
+            CreateInstance(data);
+        }
+      }
+      catch (System.Exception ex)
+      {
+        modEntry.Logger.Log($"LoadSettings error: {ex.Message}");
+      }
+    }
+
+    public static void ClearAll()
+    {
+      foreach (var inst in instances)
+      {
+        if (inst.GameObject != null)
+          GameObject.Destroy(inst.GameObject);
+      }
+
+      instances.Clear();
+    }
+  }
 }

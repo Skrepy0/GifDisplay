@@ -1,179 +1,269 @@
 ﻿using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.Networking;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 
 public class Display : MonoBehaviour
 {
-    public RawImage rawImage;
-    public string localPath = "";
+  public RawImage rawImage;
+  public string localPath = "";
 
-    private Texture2D[] gifTextures;
-    private float[] gifDelays;
-    private int frameIndex = 0;
-    private float timer = 0f;
-    private bool isPlaying = false;
+  private Texture2D[] _gifTextures;
+  private float[] _gifDelays;
 
-    // 原始尺寸
-    public int GifWidth { get; private set; }
-    public int GifHeight { get; private set; }
+  private int _frameIndex;
+  private bool _isPlaying;
 
-    // 加载完成回调
-    public System.Action OnGifLoaded;
+  public int gifWidth { get; private set; }
+  public int gifHeight { get; private set; }
 
-    public static System.Action<string> LogErrorCallback;
+  public System.Action OnGifLoaded;
+  public static System.Action<string> LogErrorCallback;
 
-    private static readonly Dictionary<string, CachedGif> gifCache = new Dictionary<string, CachedGif>();
+  // ================= CACHE =================
+  private class CachedGif
+  {
+    public Texture2D[] Textures;
+    public float[] Delays;
+    public int Width;
+    public int Height;
+  }
 
-    private class CachedGif
+  private static readonly Dictionary<string, CachedGif> GifCache = new();
+  private const int MaxCache = 20;
+
+  private Coroutine _playCoroutine;
+
+  void Start()
+  {
+    if (rawImage == null)
+      rawImage = GetComponent<RawImage>();
+
+    StartCoroutine(LoadGif());
+  }
+
+  // ================= LOAD =================
+  public IEnumerator LoadGif()
+  {
+    if (string.IsNullOrEmpty(localPath) || !File.Exists(localPath))
     {
-        public Texture2D[] textures;
-        public float[] delays;
-        public int width;
-        public int height;
+      LogErrorCallback?.Invoke($"Invalid path: {localPath}");
+      yield break;
     }
 
-    void Start()
+    string cacheKey = localPath;
+
+    if (GifCache.TryGetValue(cacheKey, out var cached))
     {
-        if (rawImage == null)
-            rawImage = GetComponent<RawImage>();
-        StartCoroutine(LoadGif());
+      ApplyCache(cached);
+      yield break;
     }
 
-    public IEnumerator LoadGif()
+    byte[] fileData;
+
+    try
     {
-        // 检查本地路径是否有效
-        if (string.IsNullOrEmpty(localPath) || !File.Exists(localPath))
-        {
-            LogErrorCallback?.Invoke($"Local path invalid or file not found: {localPath}");
-            yield break;
-        }
-
-        string cacheKey = localPath;
-        LogErrorCallback?.Invoke($"Loading local GIF: {localPath}");
-
-        byte[] gifData;
-        try
-        {
-            gifData = File.ReadAllBytes(localPath);
-            LogErrorCallback?.Invoke($"Read {gifData.Length} bytes from file");
-        }
-        catch (System.Exception ex)
-        {
-            LogErrorCallback?.Invoke($"Failed to read file: {ex.Message}");
-            yield break;
-        }
-
-        // 检查缓存
-        if (gifCache.TryGetValue(cacheKey, out var cached))
-        {
-            LogErrorCallback?.Invoke("Cache hit");
-            gifTextures = cached.textures;
-            gifDelays = cached.delays;
-            GifWidth = cached.width;
-            GifHeight = cached.height;
-            isPlaying = true;
-            if (gifTextures.Length > 0)
-            {
-                rawImage.texture = gifTextures[0];
-                LogErrorCallback?.Invoke(
-                    $"Loaded cached GIF, {gifTextures.Length} frames, size: {GifWidth}x{GifHeight}");
-                OnGifLoaded?.Invoke();
-            }
-
-            yield break;
-        }
-
-        // 解码
-        LogErrorCallback?.Invoke("Decoding GIF...");
-        yield return StartCoroutine(UniGif.GetTextureListCoroutine(
-            gifData,
-            (textures, loopCount, width, height) =>
-            {
-                try
-                {
-                    if (textures == null || textures.Count == 0)
-                    {
-                        LogErrorCallback?.Invoke("Decode returned empty texture list");
-                        return;
-                    }
-
-                    gifTextures = new Texture2D[textures.Count];
-                    gifDelays = new float[textures.Count];
-                    for (int i = 0; i < textures.Count; i++)
-                    {
-                        gifTextures[i] = textures[i].m_texture2d;
-                        gifDelays[i] = textures[i].m_delaySec;
-                    }
-
-                    GifWidth = width;
-                    GifHeight = height;
-
-                    gifCache[cacheKey] = new CachedGif
-                    {
-                        textures = gifTextures,
-                        delays = gifDelays,
-                        width = width,
-                        height = height
-                    };
-
-                    isPlaying = true;
-                    if (gifTextures.Length > 0)
-                    {
-                        rawImage.texture = gifTextures[0];
-                        LogErrorCallback?.Invoke($"Decoded {gifTextures.Length} frames, size: {GifWidth}x{GifHeight}");
-                        OnGifLoaded?.Invoke();
-                    }
-                }
-                catch (System.Exception ex)
-                {
-                    LogErrorCallback?.Invoke($"Decode exception: {ex.Message}");
-                }
-            }
-        ));
+      fileData = File.ReadAllBytes(localPath);
+    }
+    catch (System.Exception ex)
+    {
+      LogErrorCallback?.Invoke(ex.Message);
+      yield break;
     }
 
-    void Update()
-    {
-        if (!isPlaying || gifTextures == null || gifTextures.Length == 0)
-            return;
+    string ext = Path.GetExtension(localPath).ToLower();
 
-        timer += Time.deltaTime;
-        if (timer >= gifDelays[frameIndex])
+    if (ext == ".jpg" || ext == ".png" || ext == ".jpeg" || ext == ".webp")
+    {
+      yield return LoadStatic(fileData, ext, cacheKey);
+    }
+    else if (ext == ".gif")
+    {
+      yield return LoadGifInternal(fileData, cacheKey);
+    }
+    else
+    {
+      LogErrorCallback?.Invoke("Unsupported format");
+    }
+  }
+
+  // ================= STATIC =================
+  private IEnumerator LoadStatic(byte[] fileData, string ext, string cacheKey)
+  {
+    Texture2D tex;
+
+    if (ext == ".webp")
+    {
+      using var req = UnityWebRequestTexture.GetTexture("file://" + localPath);
+      yield return req.SendWebRequest();
+
+      if (req.result != UnityWebRequest.Result.Success)
+      {
+        LogErrorCallback?.Invoke(req.error);
+        yield break;
+      }
+
+      tex = DownloadHandlerTexture.GetContent(req);
+    }
+    else
+    {
+      tex = new Texture2D(2, 2);
+      if (!tex.LoadImage(fileData))
+      {
+        Destroy(tex);
+        yield break;
+      }
+    }
+
+    _gifTextures = new[] { tex };
+    _gifDelays = new[] { 0.1f };
+
+    gifWidth = tex.width;
+    gifHeight = tex.height;
+
+    AddCache(cacheKey);
+
+    ApplyTexture(tex);
+
+    OnGifLoaded?.Invoke();
+  }
+
+  // ================= GIF =================
+  private IEnumerator LoadGifInternal(byte[] fileData, string cacheKey)
+  {
+    yield return UniGif.GetTextureListCoroutine(
+      fileData,
+      (textures, loopCount, width, height) =>
+      {
+        if (textures == null || textures.Count == 0) return;
+
+        _gifTextures = new Texture2D[textures.Count];
+        _gifDelays = new float[textures.Count];
+
+        for (int i = 0; i < textures.Count; i++)
         {
-            timer = 0f;
-            frameIndex = (frameIndex + 1) % gifTextures.Length;
-            rawImage.texture = gifTextures[frameIndex];
-        }
-    }
-
-    public void Reload(bool forceReDownload = false)
-    {
-        if (forceReDownload)
-        {
-            string key = localPath;
-            if (!string.IsNullOrEmpty(key) && gifCache.TryGetValue(key, out var cached))
-            {
-                foreach (var tex in cached.textures)
-                    Destroy(tex);
-                gifCache.Remove(key);
-            }
-
-            gifTextures = null;
-            gifDelays = null;
-            rawImage.texture = null;
-            GifWidth = 0;
-            GifHeight = 0;
+          _gifTextures[i] = textures[i].m_texture2d;
+          _gifDelays[i] = textures[i].m_delaySec;
         }
 
-        StopAllCoroutines();
-        StartCoroutine(LoadGif());
+        gifWidth = width;
+        gifHeight = height;
+
+        AddCache(cacheKey);
+
+        StartPlayback();
+
+        OnGifLoaded?.Invoke();
+      }
+    );
+  }
+
+  // ================= PLAY =================
+  private void StartPlayback()
+  {
+    if (_playCoroutine != null)
+      StopCoroutine(_playCoroutine);
+
+    if (_gifTextures == null || _gifTextures.Length <= 1)
+    {
+      ApplyTexture(_gifTextures?[0]);
+      return;
     }
 
-    void OnDestroy()
+    _isPlaying = true;
+    _frameIndex = 0;
+
+    _playCoroutine = StartCoroutine(PlayLoop());
+  }
+
+  private IEnumerator PlayLoop()
+  {
+    while (_isPlaying && _gifTextures != null)
     {
-        isPlaying = false;
-        rawImage.texture = null;
+      ApplyTexture(_gifTextures[_frameIndex]);
+
+      yield return new WaitForSecondsRealtime(_gifDelays[_frameIndex]);
+
+      _frameIndex = (_frameIndex + 1) % _gifTextures.Length;
     }
+  }
+
+  private void ApplyTexture(Texture2D tex)
+  {
+    if (!ReferenceEquals(rawImage, null))
+      rawImage.texture = tex;
+  }
+
+  // ================= CACHE =================
+  private void AddCache(string key)
+  {
+    if (GifCache.Count > MaxCache)
+    {
+      var first = GifCache.Keys.First();
+      Release(GifCache[first].Textures);
+      GifCache.Remove(first);
+    }
+
+    GifCache[key] = new CachedGif
+    {
+      Textures = _gifTextures,
+      Delays = _gifDelays,
+      Width = gifWidth,
+      Height = gifHeight
+    };
+  }
+
+  private void ApplyCache(CachedGif cached)
+  {
+    _gifTextures = cached.Textures;
+    _gifDelays = cached.Delays;
+    gifWidth = cached.Width;
+    gifHeight = cached.Height;
+
+    ApplyTexture(_gifTextures[0]);
+    StartPlayback();
+
+    OnGifLoaded?.Invoke();
+  }
+
+  // ================= RELEASE =================
+  private void Release(Texture2D[] textures)
+  {
+    if (textures == null) return;
+
+    foreach (var t in textures)
+      if (!ReferenceEquals(t, null))
+        Destroy(t);
+  }
+
+  // ================= RELOAD =================
+  public void Reload(bool force = false)
+  {
+    if (force && GifCache.TryGetValue(localPath, out var cached))
+    {
+      Release(cached.Textures);
+      GifCache.Remove(localPath);
+    }
+
+    StopAllCoroutines();
+    StartCoroutine(LoadGif());
+  }
+
+  void OnDestroy()
+  {
+    _isPlaying = false;
+
+    if (_playCoroutine != null)
+      StopCoroutine(_playCoroutine);
+  }
+
+  void OnApplicationQuit()
+  {
+    foreach (var kv in GifCache)
+      Release(kv.Value.Textures);
+    GifCache.Clear();
+  }
 }
