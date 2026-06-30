@@ -1,0 +1,12 @@
+{
+  "Id": "GifDisplay",
+  "DisplayName": "GifDisplay",
+  "Author": "Skrepy2233",
+  "Version": "1.0.1",
+  "ManagerVersion": "0.32.5",
+  "Requirements": ["JALib"],
+  "AssemblyName": "GifDisplay.dll",
+  "EntryMethod": "GifDisplay.Main.Load",
+  "HomePage": "https://github.com/Skrepy0/GifDisplay",
+  "Repository": "https://github.com/Skrepy0/GifDisplay"
+}

@@ -9,3 +9,5 @@ obj/
 
 # Library
 packages/
+
+dist/
