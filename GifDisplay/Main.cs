@@ -127,13 +127,13 @@ namespace GifDisplay
     {
       if (!modEntry.Active) return;
 
-      GUILayout.BeginVertical("box", GUILayout.Width(800));
+      GUILayout.BeginVertical("box", GUILayout.Width(2000));
 
-      GUILayout.Label("Add New Image", GUILayout.Width(150));
+      GUILayout.Label("Add New Image", GUILayout.Width(500));
       GUILayout.BeginHorizontal();
-      GUILayout.Label("Path:", GUILayout.Width(50));
-      newImagePath = GUILayout.TextField(newImagePath, GUILayout.Width(400));
-      if (GUILayout.Button("Add", GUILayout.Width(80)))
+      GUILayout.Label("Path:", GUILayout.Width(150));
+      newImagePath = GUILayout.TextField(newImagePath, GUILayout.Width(600));
+      if (GUILayout.Button("Add", GUILayout.Width(150)))
       {
         if (!string.IsNullOrEmpty(newImagePath) && File.Exists(newImagePath))
         {
@@ -174,9 +174,9 @@ namespace GifDisplay
 
         // 路径 + 重载
         GUILayout.BeginHorizontal();
-        GUILayout.Label("Path:", GUILayout.Width(50));
-        GUILayout.Label(settings.PicGifPath, GUILayout.Width(400));
-        if (GUILayout.Button("Reload", GUILayout.Width(120)))
+        GUILayout.Label("Path:", GUILayout.Width(100));
+        GUILayout.Label(settings.PicGifPath, GUILayout.Width(650));
+        if (GUILayout.Button("Reload", GUILayout.Width(150)))
         {
           inst.Display.localPath = settings.PicGifPath;
           inst.Display.Reload(true);
@@ -187,8 +187,8 @@ namespace GifDisplay
 
         // ---- X 滑块（-100 ~ 100） ----
         GUILayout.BeginHorizontal();
-        GUILayout.Label("X (%)", GUILayout.Width(80));
-        float newX = GUILayout.HorizontalSlider(settings.PosX, -100f, 100f, GUILayout.Width(200));
+        GUILayout.Label("X (%)", GUILayout.Width(150));
+        float newX = GUILayout.HorizontalSlider(settings.PosX, -100f, 100f, GUILayout.Width(550));
         if (newX != settings.PosX)
         {
           settings.PosX = newX;
@@ -201,8 +201,8 @@ namespace GifDisplay
 
         // ---- Y 滑块（-100 ~ 100） ----
         GUILayout.BeginHorizontal();
-        GUILayout.Label("Y (%)", GUILayout.Width(80));
-        float newY = GUILayout.HorizontalSlider(settings.PosY, -100f, 100f, GUILayout.Width(200));
+        GUILayout.Label("Y (%)", GUILayout.Width(150));
+        float newY = GUILayout.HorizontalSlider(settings.PosY, -100f, 100f, GUILayout.Width(550));
         if (newY != settings.PosY)
         {
           settings.PosY = newY;
@@ -215,8 +215,8 @@ namespace GifDisplay
 
         // ---- Scale ----
         GUILayout.BeginHorizontal();
-        GUILayout.Label("Scale", GUILayout.Width(80));
-        float newScale = GUILayout.HorizontalSlider(settings.Scale, 0.1f, 3f, GUILayout.Width(200));
+        GUILayout.Label("Scale", GUILayout.Width(150));
+        float newScale = GUILayout.HorizontalSlider(settings.Scale, 0.1f, 3f, GUILayout.Width(550));
         if (newScale != settings.Scale)
         {
           settings.Scale = newScale;
@@ -224,13 +224,13 @@ namespace GifDisplay
           changed = true;
         }
 
-        GUILayout.Label(inst.ScaleStr, GUILayout.Width(60));
+        GUILayout.Label(inst.ScaleStr, GUILayout.Width(80));
         GUILayout.EndHorizontal();
 
         // ---- Opacity ----
         GUILayout.BeginHorizontal();
-        GUILayout.Label("Opacity", GUILayout.Width(80));
-        float newOpacity = GUILayout.HorizontalSlider(settings.Opacity, 0f, 1f, GUILayout.Width(200));
+        GUILayout.Label("Opacity", GUILayout.Width(150));
+        float newOpacity = GUILayout.HorizontalSlider(settings.Opacity, 0f, 1f, GUILayout.Width(550));
         if (newOpacity != settings.Opacity)
         {
           settings.Opacity = newOpacity;
@@ -238,7 +238,7 @@ namespace GifDisplay
           changed = true;
         }
 
-        GUILayout.Label(inst.OpacityStr, GUILayout.Width(60));
+        GUILayout.Label(inst.OpacityStr, GUILayout.Width(100));
         GUILayout.EndHorizontal();
 
         // ---------- 删除按钮 ----------
