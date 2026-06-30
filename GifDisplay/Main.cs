@@ -4,6 +4,7 @@ using UnityEngine.UI;
 using System.IO;
 using System.Collections.Generic;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace GifDisplay
 {
@@ -21,12 +22,10 @@ namespace GifDisplay
     public GameObject GameObject;
     public Display Display;
     public SettingsData Settings;
-
     public string PosXStr;
     public string PosYStr;
     public string ScaleStr;
     public string OpacityStr;
-
     public bool ConfirmDelete;
 
     public ImageInstance(SettingsData data)
@@ -50,11 +49,12 @@ namespace GifDisplay
     private static GameObject canvasObject;
     private static List<ImageInstance> instances = new();
     private static string settingsPath;
-
     private static string newImagePath = "";
-
     private static int lastScreenWidth;
     private static int lastScreenHeight;
+
+    private static int sortingOrder = 9;
+    private static string sortingOrderStr = "9";
 
     public static bool Load(UnityModManager.ModEntry entry)
     {
@@ -86,6 +86,9 @@ namespace GifDisplay
         SaveSettings();
       }
 
+      // 应用排序
+      ApplySortingOrder();
+
       modEntry.Logger.Log($"GifDisplay Mod loaded with {instances.Count} instances");
       return true;
     }
@@ -110,24 +113,41 @@ namespace GifDisplay
     private static bool OnUnload(UnityModManager.ModEntry entry)
     {
       foreach (var inst in instances)
-      {
         if (inst.GameObject != null)
-          GameObject.Destroy(inst.GameObject);
-      }
-
+          Object.Destroy(inst.GameObject);
       instances.Clear();
-
       if (canvasObject != null)
-        GameObject.Destroy(canvasObject);
-
+        Object.Destroy(canvasObject);
       return true;
     }
 
+    // ---------- GUI ----------
     private static void OnGUI(UnityModManager.ModEntry entry)
     {
       if (!modEntry.Active) return;
 
       GUILayout.BeginVertical("box", GUILayout.Width(2000));
+
+      GUILayout.BeginHorizontal();
+      GUILayout.Label("Sorting Order", GUILayout.Width(200));
+      string newOrderStr = GUILayout.TextField(sortingOrderStr, GUILayout.Width(150));
+      if (newOrderStr != sortingOrderStr)
+      {
+        if (int.TryParse(newOrderStr, out int newOrder))
+        {
+          sortingOrder = newOrder;
+          sortingOrderStr = newOrderStr;
+          ApplySortingOrder();
+          SaveSettings();
+        }
+        else
+        {
+          sortingOrderStr = sortingOrder.ToString();
+        }
+      }
+
+      GUILayout.Label("(negative = behind, positive = in front)", GUILayout.Width(300));
+      GUILayout.EndHorizontal();
 
       GUILayout.Label("Add New Image", GUILayout.Width(500));
       GUILayout.BeginHorizontal();
@@ -163,6 +183,7 @@ namespace GifDisplay
 
       GUILayout.EndHorizontal();
 
+      // ---- 图片列表 ----
       for (int i = 0; i < instances.Count; i++)
       {
         var inst = instances[i];
@@ -180,12 +201,12 @@ namespace GifDisplay
         {
           inst.Display.localPath = settings.PicGifPath;
           inst.Display.Reload(true);
-          inst.ConfirmDelete = false; // 重置确认状态
+          inst.ConfirmDelete = false;
         }
 
         GUILayout.EndHorizontal();
 
-        // ---- X 滑块（-100 ~ 100） ----
+        // X
         GUILayout.BeginHorizontal();
         GUILayout.Label("X (%)", GUILayout.Width(150));
         float newX = GUILayout.HorizontalSlider(settings.PosX, -100f, 100f, GUILayout.Width(550));
@@ -199,7 +220,7 @@ namespace GifDisplay
         GUILayout.Label(inst.PosXStr, GUILayout.Width(120));
         GUILayout.EndHorizontal();
 
-        // ---- Y 滑块（-100 ~ 100） ----
+        // Y
         GUILayout.BeginHorizontal();
         GUILayout.Label("Y (%)", GUILayout.Width(150));
         float newY = GUILayout.HorizontalSlider(settings.PosY, -100f, 100f, GUILayout.Width(550));
@@ -213,7 +234,7 @@ namespace GifDisplay
         GUILayout.Label(inst.PosYStr, GUILayout.Width(120));
         GUILayout.EndHorizontal();
 
-        // ---- Scale ----
+        // Scale
         GUILayout.BeginHorizontal();
         GUILayout.Label("Scale", GUILayout.Width(150));
         float newScale = GUILayout.HorizontalSlider(settings.Scale, 0.1f, 3f, GUILayout.Width(550));
@@ -227,7 +248,7 @@ namespace GifDisplay
         GUILayout.Label(inst.ScaleStr, GUILayout.Width(80));
         GUILayout.EndHorizontal();
 
-        // ---- Opacity ----
+        // Opacity
         GUILayout.BeginHorizontal();
         GUILayout.Label("Opacity", GUILayout.Width(150));
         float newOpacity = GUILayout.HorizontalSlider(settings.Opacity, 0f, 1f, GUILayout.Width(550));
@@ -241,9 +262,9 @@ namespace GifDisplay
         GUILayout.Label(inst.OpacityStr, GUILayout.Width(100));
         GUILayout.EndHorizontal();
 
-        // ---------- 删除按钮 ----------
+        // 删除
         if (changed)
-          inst.ConfirmDelete = false; // 参数改变时重置确认状态
+          inst.ConfirmDelete = false;
 
         Color oldColor = GUI.backgroundColor;
         GUI.backgroundColor = Color.red;
@@ -254,7 +275,7 @@ namespace GifDisplay
           if (inst.ConfirmDelete)
           {
             if (inst.GameObject != null)
-              GameObject.Destroy(inst.GameObject);
+              Object.Destroy(inst.GameObject);
             instances.RemoveAt(i);
             SaveSettings();
             GUILayout.EndVertical();
@@ -293,12 +314,30 @@ namespace GifDisplay
       }
 
       canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-      canvas.sortingOrder = 999;
-      GameObject.DontDestroyOnLoad(canvasObject);
+      // 排序将在 ApplySortingOrder 中设置
+
+      var scaler = canvasObject.AddComponent<CanvasScaler>();
+      scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+      scaler.referenceResolution = new Vector2(1920, 1080);
+      scaler.matchWidthOrHeight = 0.5f;
+
+      Object.DontDestroyOnLoad(canvasObject);
       return true;
     }
 
-    // ---------- 创建单个实例 ----------
+    // ---------- 应用排序 ----------
+    private static void ApplySortingOrder()
+    {
+      if (canvasObject == null) return;
+      var canvas = canvasObject.GetComponent<Canvas>();
+      if (canvas != null)
+      {
+        canvas.sortingOrder = sortingOrder;
+        modEntry.Logger.Log($"Applied sortingOrder = {sortingOrder}");
+      }
+    }
+
+    // ---------- 创建实例 ----------
     private static void CreateInstance(SettingsData data)
     {
       if (canvasObject == null) return;
@@ -308,7 +347,6 @@ namespace GifDisplay
       var go = new GameObject("GifImage");
       go.transform.SetParent(canvasObject.transform, false);
       var rect = go.AddComponent<RectTransform>();
-
       rect.anchorMin = new Vector2(0.5f, 0.5f);
       rect.anchorMax = new Vector2(0.5f, 0.5f);
       rect.pivot = new Vector2(0.5f, 0.5f);
@@ -328,11 +366,12 @@ namespace GifDisplay
       display.Reload(true);
 
       UpdateInstanceTransform(inst);
+      inst.GameObject.SetActive(true);
 
       instances.Add(inst);
     }
 
-    // ---------- 更新单个实例的 Transform ----------
+    // ---------- 变换更新 ----------
     private static void UpdateInstanceTransform(ImageInstance inst)
     {
       if (ReferenceEquals(inst.GameObject, null) || ReferenceEquals(inst.Display, null)) return;
@@ -371,46 +410,75 @@ namespace GifDisplay
         UpdateInstanceTransform(inst);
     }
 
+    // ---------- 保存/加载（支持新格式） ----------
     private static void SaveSettings()
     {
       if (string.IsNullOrEmpty(settingsPath)) return;
+
+      JObject root = new JObject();
+      root["sortingOrder"] = sortingOrder;
 
       var list = new List<SettingsData>();
       foreach (var inst in instances)
         list.Add(inst.Settings);
 
-      string json = JsonConvert.SerializeObject(list, Formatting.Indented);
-      File.WriteAllText(settingsPath, json);
+      string instancesJson = JsonConvert.SerializeObject(list, Formatting.Indented);
+      root["instances"] = JArray.Parse(instancesJson);
+
+      File.WriteAllText(settingsPath, root.ToString(Formatting.Indented));
     }
 
     private static void LoadSettings()
     {
       if (!File.Exists(settingsPath)) return;
-
       try
       {
         string json = File.ReadAllText(settingsPath);
-        var list = JsonConvert.DeserializeObject<List<SettingsData>>(json);
-        if (list != null)
+        JObject root = JObject.Parse(json);
+
+        // 读取排序
+        if (root.TryGetValue("sortingOrder", out JToken orderToken))
         {
-          foreach (var data in list)
-            CreateInstance(data);
+          sortingOrder = orderToken.Value<int>();
+          sortingOrderStr = sortingOrder.ToString();
+        }
+
+        // 读取实例列表
+        if (root.TryGetValue("instances", out JToken instancesToken))
+        {
+          var list = instancesToken.ToObject<List<SettingsData>>();
+          if (list != null)
+          {
+            foreach (var data in list)
+              CreateInstance(data);
+          }
         }
       }
       catch (System.Exception ex)
       {
         modEntry.Logger.Log($"LoadSettings error: {ex.Message}");
+        try
+        {
+          string json = File.ReadAllText(settingsPath);
+          var list = JsonConvert.DeserializeObject<List<SettingsData>>(json);
+          if (list != null)
+          {
+            foreach (var data in list)
+              CreateInstance(data);
+          }
+        }
+        catch
+        {
+          modEntry.Logger.Log("Failed to load settings with old format.");
+        }
       }
     }
 
     public static void ClearAll()
     {
       foreach (var inst in instances)
-      {
         if (inst.GameObject != null)
-          GameObject.Destroy(inst.GameObject);
-      }
-
+          Object.Destroy(inst.GameObject);
       instances.Clear();
     }
   }
