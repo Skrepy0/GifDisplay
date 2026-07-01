@@ -1,0 +1,62 @@
+{
+  "entries": [
+    {
+      "key": "add_new_image",
+      "en": "Add New Image",
+      "zh": "添加新图片",
+      "ko": "새 이미지 추가"
+    },
+    { "key": "path", "en": "Path:", "zh": "路径:", "ko": "경로:" },
+    { "key": "add", "en": "Add", "zh": "添加", "ko": "추가" },
+    {
+      "key": "invalid_path",
+      "en": "Invalid file path: ",
+      "zh": "无效文件路径: ",
+      "ko": "잘못된 파일 경로: "
+    },
+    { "key": "reload", "en": "Reload", "zh": "重新加载", "ko": "다시 로드" },
+    { "key": "preview", "en": "Preview:", "zh": "预览:", "ko": "미리보기:" },
+    {
+      "key": "no_image",
+      "en": "No Image",
+      "zh": "无图片",
+      "ko": "이미지 없음"
+    },
+    { "key": "x_percent", "en": "X (%)", "zh": "X (%)", "ko": "X (%)" },
+    { "key": "y_percent", "en": "Y (%)", "zh": "Y (%)", "ko": "Y (%)" },
+    { "key": "scale", "en": "Scale", "zh": "缩放", "ko": "크기 조정" },
+    { "key": "opacity", "en": "Opacity", "zh": "透明度", "ko": "투명도" },
+    {
+      "key": "sorting_order",
+      "en": "Sorting Order",
+      "zh": "排序顺序",
+      "ko": "정렬 순서"
+    },
+    {
+      "key": "higher_in_front",
+      "en": "(higher = in front)",
+      "zh": "(数值大在前)",
+      "ko": "(값이 클수록 앞)"
+    },
+    {
+      "key": "show_only_during_play",
+      "en": "Show only during play",
+      "zh": "仅在游戏时显示",
+      "ko": "게임 중에만 표시"
+    },
+    { "key": "delete", "en": "Delete", "zh": "删除", "ko": "삭제" },
+    {
+      "key": "confirm",
+      "en": "Confirm?",
+      "zh": "确认删除?",
+      "ko": "삭제 확인?"
+    },
+    { "key": "image", "en": "Image", "zh": "图片", "ko": "이미지" },
+    {
+      "key": "reloading",
+      "en": "Reloading...",
+      "zh": "重新加载中...",
+      "ko": "다시 로드 중..."
+    }
+  ]
+}

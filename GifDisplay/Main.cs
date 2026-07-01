@@ -1,15 +1,19 @@
-﻿using UnityModManagerNet;
+﻿using System;
+using UnityModManagerNet;
 using UnityEngine;
 using UnityEngine.UI;
 using System.IO;
 using System.Collections.Generic;
 using Newtonsoft.Json;
 using System.Reflection;
+using Newtonsoft.Json.Linq;
+using Object = UnityEngine.Object;
 
 namespace GifDisplay
 {
   public class Main
   {
+    public const string ModId = "GifDisplay";
     private static UnityModManager.ModEntry modEntry;
     private static GameObject canvasObject;
     private static Canvas canvas;
@@ -46,6 +50,8 @@ namespace GifDisplay
         modEntry.Logger.Log("Failed to create Canvas");
         return false;
       }
+
+      I18n.Load(entry.Path);
 
       loading = true;
       LoadSettings();
@@ -104,12 +110,30 @@ namespace GifDisplay
 
       GUILayout.BeginVertical("box", GUILayout.Width(2000));
 
-      GUILayout.Label("Add New Image", GUILayout.Width(500));
+      // ================= 语言切换 =================
       GUILayout.BeginHorizontal();
-      GUILayout.Label("Path:", GUILayout.Width(150));
+      GUILayout.Label("Language:", GUILayout.Width(150));
+      string[] langs = { "en", "zh", "ko" };
+      string[] langNames = { "English", "中文", "한국어" };
+      int idx = Array.IndexOf(langs, I18n.Lang);
+      if (idx < 0) idx = 0;
+      int newIdx = GUILayout.SelectionGrid(idx, langNames, 3, GUILayout.Width(600));
+      if (newIdx != idx)
+      {
+        I18n.Lang = langs[newIdx];
+        SaveSettings();
+      }
+
+      GUILayout.FlexibleSpace();
+      GUILayout.EndHorizontal();
+
+      // ================= 添加新图片 =================
+      GUILayout.Label(I18n.Tr("add_new_image"), GUILayout.Width(500));
+      GUILayout.BeginHorizontal();
+      GUILayout.Label(I18n.Tr("path"), GUILayout.Width(150));
       newImagePath = GUILayout.TextField(newImagePath, GUILayout.Width(600));
 
-      if (GUILayout.Button("Add", GUILayout.Width(150)))
+      if (GUILayout.Button(I18n.Tr("add"), GUILayout.Width(150)))
       {
         if (!string.IsNullOrEmpty(newImagePath))
         {
@@ -143,13 +167,13 @@ namespace GifDisplay
         }
         else
         {
-          modEntry.Logger.Log("Invalid file path: " + newImagePath);
+          modEntry.Logger.Log(I18n.Tr("invalid_path") + newImagePath);
         }
       }
 
       GUILayout.EndHorizontal();
 
-      // ---- 图片列表 ----
+      // ================= 图片列表 =================
       for (int i = 0; i < Instances.Count; i++)
       {
         var inst = Instances[i];
@@ -157,15 +181,14 @@ namespace GifDisplay
         bool changed = false;
 
         GUILayout.BeginVertical("box");
-        GUILayout.Label($"Image #{i + 1}");
+        GUILayout.Label($"{I18n.Tr("image")} #{i + 1}");
 
-        // 路径 + 重载
+        // ---------- 路径 + 重载 ----------
         GUILayout.BeginHorizontal();
-        GUILayout.Label("Path:", GUILayout.Width(100));
+        GUILayout.Label(I18n.Tr("path"), GUILayout.Width(100));
         GUILayout.Label(settings.PicGifPath, GUILayout.Width(750));
-        if (GUILayout.Button("Reload", GUILayout.Width(150)))
+        if (GUILayout.Button(I18n.Tr("reload"), GUILayout.Width(200)))
         {
-          isReloading = true;
           inst.Display.localPath = settings.PicGifPath;
           inst.Display.Reload(true);
           inst.ConfirmDelete = false;
@@ -173,22 +196,22 @@ namespace GifDisplay
 
         GUILayout.EndHorizontal();
 
-        // 预览
+        // ---------- 预览 ----------
         GUILayout.BeginHorizontal();
-        GUILayout.Label("Preview:", GUILayout.Width(120));
+        GUILayout.Label(I18n.Tr("preview"), GUILayout.Width(120));
         Texture tex = null;
         if (inst.Display != null)
           tex = inst.Display.PreviewTexture;
         if (tex != null)
           GUILayout.Box(new GUIContent(tex), GUILayout.Width(100), GUILayout.Height(100));
         else
-          GUILayout.Box("No Image", GUILayout.Width(100), GUILayout.Height(100));
+          GUILayout.Box(I18n.Tr("no_image"), GUILayout.Width(100), GUILayout.Height(100));
         GUILayout.FlexibleSpace();
         GUILayout.EndHorizontal();
 
-        // X
+        // ---------- X ----------
         GUILayout.BeginHorizontal();
-        GUILayout.Label("X (%)", GUILayout.Width(150));
+        GUILayout.Label(I18n.Tr("x_percent"), GUILayout.Width(150));
         float newX = GUILayout.HorizontalSlider(settings.PosX, -100f, 100f, GUILayout.Width(850));
         if (newX != settings.PosX)
         {
@@ -200,9 +223,9 @@ namespace GifDisplay
         GUILayout.Label(inst.PosXStr, GUILayout.Width(120));
         GUILayout.EndHorizontal();
 
-        // Y
+        // ---------- Y ----------
         GUILayout.BeginHorizontal();
-        GUILayout.Label("Y (%)", GUILayout.Width(150));
+        GUILayout.Label(I18n.Tr("y_percent"), GUILayout.Width(150));
         float newY = GUILayout.HorizontalSlider(settings.PosY, -100f, 100f, GUILayout.Width(850));
         if (newY != settings.PosY)
         {
@@ -214,9 +237,9 @@ namespace GifDisplay
         GUILayout.Label(inst.PosYStr, GUILayout.Width(120));
         GUILayout.EndHorizontal();
 
-        // Scale
+        // ---------- Scale ----------
         GUILayout.BeginHorizontal();
-        GUILayout.Label("Scale", GUILayout.Width(150));
+        GUILayout.Label(I18n.Tr("scale"), GUILayout.Width(150));
         float newScale = GUILayout.HorizontalSlider(settings.Scale, 0.1f, 3f, GUILayout.Width(850));
         if (newScale != settings.Scale)
         {
@@ -228,9 +251,9 @@ namespace GifDisplay
         GUILayout.Label(inst.ScaleStr, GUILayout.Width(80));
         GUILayout.EndHorizontal();
 
-        // Opacity
+        // ---------- Opacity ----------
         GUILayout.BeginHorizontal();
-        GUILayout.Label("Opacity", GUILayout.Width(150));
+        GUILayout.Label(I18n.Tr("opacity"), GUILayout.Width(150));
         float newOpacity = GUILayout.HorizontalSlider(settings.Opacity, 0f, 1f, GUILayout.Width(850));
         if (newOpacity != settings.Opacity)
         {
@@ -242,9 +265,9 @@ namespace GifDisplay
         GUILayout.Label(inst.OpacityStr, GUILayout.Width(100));
         GUILayout.EndHorizontal();
 
-        // Sorting Order
+        // ---------- Sorting Order ----------
         GUILayout.BeginHorizontal();
-        GUILayout.Label("Sorting Order", GUILayout.Width(250));
+        GUILayout.Label(I18n.Tr("sorting_order"), GUILayout.Width(250));
         string newSortStr = GUILayout.TextField(inst.SortingOrderStr, GUILayout.Width(100));
         if (newSortStr != inst.SortingOrderStr)
         {
@@ -261,12 +284,12 @@ namespace GifDisplay
           }
         }
 
-        GUILayout.Label("(higher = in front)", GUILayout.Width(550));
+        GUILayout.Label(I18n.Tr("higher_in_front"), GUILayout.Width(550));
         GUILayout.EndHorizontal();
 
-        // Show only during play
+        // ---------- Show only during play ----------
         GUILayout.BeginHorizontal();
-        GUILayout.Label("Show only during play", GUILayout.Width(400));
+        GUILayout.Label(I18n.Tr("show_only_during_play"), GUILayout.Width(250));
         bool newShowOnly = GUILayout.Toggle(settings.ShowOnlyDuringPlay, "");
         if (newShowOnly != settings.ShowOnlyDuringPlay)
         {
@@ -277,14 +300,14 @@ namespace GifDisplay
         GUILayout.FlexibleSpace();
         GUILayout.EndHorizontal();
 
-        // 删除
+        // ---------- 删除按钮 ----------
         if (changed)
           inst.ConfirmDelete = false;
 
         Color oldColor = GUI.backgroundColor;
         GUI.backgroundColor = Color.red;
 
-        string deleteText = inst.ConfirmDelete ? "Confirm?" : "Delete";
+        string deleteText = inst.ConfirmDelete ? I18n.Tr("confirm") : I18n.Tr("delete");
         if (GUILayout.Button(deleteText, GUILayout.Width(200)))
         {
           if (inst.ConfirmDelete)
@@ -578,12 +601,15 @@ namespace GifDisplay
     {
       if (string.IsNullOrEmpty(settingsPath)) return;
 
-      var list = new List<SettingsData>();
-      foreach (var inst in Instances)
-        list.Add(inst.Settings);
+      JObject root = new JObject();
+      root["language"] = I18n.Lang;
 
-      string json = JsonConvert.SerializeObject(list, Formatting.Indented);
-      File.WriteAllText(settingsPath, json);
+      JArray instancesArray = new JArray();
+      foreach (var inst in Instances)
+        instancesArray.Add(JObject.FromObject(inst.Settings));
+      root["instances"] = instancesArray;
+
+      File.WriteAllText(settingsPath, root.ToString(Formatting.Indented));
     }
 
     private static void LoadSettings()
@@ -592,16 +618,44 @@ namespace GifDisplay
       try
       {
         string json = File.ReadAllText(settingsPath);
-        var list = JsonConvert.DeserializeObject<List<SettingsData>>(json);
-        if (list != null)
+        JObject root = JObject.Parse(json);
+
+        // 读取语言
+        if (root.TryGetValue("language", out JToken langToken))
         {
-          foreach (var data in list)
-            CreateInstance(data);
+          string lang = langToken.Value<string>();
+          if (!string.IsNullOrEmpty(lang))
+            I18n.Lang = lang;
+        }
+
+        // 读取实例列表
+        if (root.TryGetValue("instances", out JToken instancesToken))
+        {
+          var list = instancesToken.ToObject<List<SettingsData>>();
+          if (list != null)
+          {
+            foreach (var data in list)
+              CreateInstance(data);
+          }
         }
       }
-      catch (System.Exception ex)
+      catch (Exception ex)
       {
-        modEntry.Logger.Log($"LoadSettings error: {ex.Message}");
+        // 兼容旧格式（纯数组）
+        try
+        {
+          string json = File.ReadAllText(settingsPath);
+          var list = JsonConvert.DeserializeObject<List<SettingsData>>(json);
+          if (list != null)
+          {
+            foreach (var data in list)
+              CreateInstance(data);
+          }
+        }
+        catch
+        {
+          modEntry.Logger.Log($"LoadSettings error: {ex.Message}");
+        }
       }
     }
 

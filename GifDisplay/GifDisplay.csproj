@@ -504,6 +504,7 @@
     <ItemGroup>
         <Compile Include="CanvasSizeListener.cs" />
         <Compile Include="Display.cs" />
+        <Compile Include="I18n.cs" />
         <Compile Include="ImageInstance.cs" />
         <Compile Include="Main.cs" />
         <Compile Include="Properties\AssemblyInfo.cs"/>
