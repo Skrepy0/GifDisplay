@@ -41,14 +41,6 @@ namespace GifDisplay
 
       LoadSettings();
 
-      if (Instances.Count == 0)
-      {
-        var defaultData = new SettingsData
-          { PicGifPath = "", PosX = 0, PosY = 0, Scale = 1f, Opacity = 1f, SortingOrder = 0 };
-        CreateInstance(defaultData);
-        SaveSettings();
-      }
-
       UpdateCachedLogicalSize();
       UpdateAllInstances();
 
@@ -95,8 +87,22 @@ namespace GifDisplay
       GUILayout.BeginHorizontal();
       GUILayout.Label("Path:", GUILayout.Width(150));
       newImagePath = GUILayout.TextField(newImagePath, GUILayout.Width(600));
+
       if (GUILayout.Button("Add", GUILayout.Width(150)))
       {
+        if (!string.IsNullOrEmpty(newImagePath))
+        {
+          if (newImagePath.StartsWith('"'))
+          {
+            newImagePath = newImagePath.Substring(1);
+          }
+
+          if (newImagePath.EndsWith('"'))
+          {
+            newImagePath = newImagePath.Substring(0, newImagePath.Length - 1);
+          }
+        }
+
         if (!string.IsNullOrEmpty(newImagePath) && File.Exists(newImagePath))
         {
           var data = new SettingsData
@@ -106,7 +112,7 @@ namespace GifDisplay
             PosY = 0f,
             Scale = 1f,
             Opacity = 1f,
-            SortingOrder = 0
+            SortingOrder = 9
           };
           if (Instances.Count > 0)
           {
@@ -147,6 +153,23 @@ namespace GifDisplay
           inst.ConfirmDelete = false;
         }
 
+        GUILayout.EndHorizontal();
+
+        GUILayout.BeginHorizontal();
+        GUILayout.Label("Preview:", GUILayout.Width(120));
+        Texture tex = null;
+        if (inst.Display != null && inst.Display.rawImage != null)
+          tex = inst.Display.rawImage.texture;
+        if (tex != null)
+        {
+          GUILayout.Box(new GUIContent(tex), GUILayout.Width(100), GUILayout.Height(100));
+        }
+        else
+        {
+          GUILayout.Box("No Image", GUILayout.Width(100), GUILayout.Height(100));
+        }
+
+        GUILayout.FlexibleSpace();
         GUILayout.EndHorizontal();
 
         // X
@@ -235,7 +258,7 @@ namespace GifDisplay
         GUI.backgroundColor = Color.red;
 
         string deleteText = inst.ConfirmDelete ? "Confirm?" : "Delete";
-        if (GUILayout.Button(deleteText, GUILayout.Width(150)))
+        if (GUILayout.Button(deleteText, GUILayout.Width(200)))
         {
           if (inst.ConfirmDelete)
           {
