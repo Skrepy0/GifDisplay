@@ -1,10 +1,9 @@
-﻿using UnityEngine;
+﻿using System.Collections;
+using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.Networking;
-using System.Collections;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 
 public class Display : MonoBehaviour
 {
@@ -17,6 +16,11 @@ public class Display : MonoBehaviour
   private int _frameIndex;
   private bool _isPlaying;
 
+  private Coroutine _playCoroutine;
+  private Coroutine _loadCoroutine;
+
+  private Texture _currentTexture;
+
   public int gifWidth { get; private set; }
   public int gifHeight { get; private set; }
 
@@ -26,6 +30,7 @@ public class Display : MonoBehaviour
   public bool isLoaded { get; private set; }
 
   // ================= CACHE =================
+
   private class CachedGif
   {
     public Texture2D[] Textures;
@@ -34,49 +39,67 @@ public class Display : MonoBehaviour
     public int Height;
   }
 
-  private static readonly Dictionary<string, CachedGif> GifCache = new();
   private const int MaxCache = 20;
 
-  private Coroutine _playCoroutine;
+  private static readonly Dictionary<string, CachedGif> GifCache =
+    new(MaxCache);
+
+  private static readonly List<string> CacheOrder = new();
+
+  private bool HasTexture =>
+    _gifTextures != null &&
+    _gifTextures.Length > 0;
 
   void Start()
   {
     if (rawImage == null)
       rawImage = GetComponent<RawImage>();
 
-    StartCoroutine(LoadGif());
+    _loadCoroutine = StartCoroutine(LoadGif());
   }
 
   void OnEnable()
   {
-    if (_gifTextures != null && _gifTextures.Length > 0 && !_isPlaying)
-    {
+    if (_isPlaying)
+      return;
+
+    if (HasTexture)
       StartPlayback();
-    }
   }
 
   void OnDisable()
   {
-    if (_playCoroutine != null)
-      StopCoroutine(_playCoroutine);
-    _isPlaying = false;
+    StopPlayback();
   }
 
-  // ---------- 外部调用恢复 ----------
   public void Resume()
   {
-    if (gameObject.activeInHierarchy && _gifTextures != null && _gifTextures.Length > 0)
-    {
+    if (!gameObject.activeInHierarchy)
+      return;
+
+    if (HasTexture)
       StartPlayback();
+  }
+
+  private void StopPlayback()
+  {
+    _isPlaying = false;
+
+    if (_playCoroutine != null)
+    {
+      StopCoroutine(_playCoroutine);
+      _playCoroutine = null;
     }
   }
 
   // ================= LOAD =================
+
   public IEnumerator LoadGif()
   {
     if (string.IsNullOrEmpty(localPath) || !File.Exists(localPath))
     {
       LogErrorCallback?.Invoke($"Invalid path: {localPath}");
+      _loadCoroutine = null;
       yield break;
     }
 
@@ -85,6 +108,7 @@ public class Display : MonoBehaviour
     if (GifCache.TryGetValue(cacheKey, out var cached))
     {
       ApplyCache(cached);
+      _loadCoroutine = null;
       yield break;
     }
 
@@ -97,12 +121,16 @@ public class Display : MonoBehaviour
     catch (System.Exception ex)
     {
       LogErrorCallback?.Invoke(ex.Message);
+      _loadCoroutine = null;
       yield break;
     }
 
-    string ext = Path.GetExtension(localPath).ToLower();
+    string ext = Path.GetExtension(localPath).ToLowerInvariant();
 
-    if (ext == ".jpg" || ext == ".png" || ext == ".jpeg" || ext == ".webp")
+    if (ext == ".jpg" ||
+        ext == ".jpeg" ||
+        ext == ".png" ||
+        ext == ".webp")
     {
       yield return LoadStatic(fileData, ext, cacheKey);
     }
@@ -114,9 +142,12 @@ public class Display : MonoBehaviour
     {
       LogErrorCallback?.Invoke("Unsupported format");
     }
+
+    _loadCoroutine = null;
   }
 
   // ================= STATIC =================
+
   private IEnumerator LoadStatic(byte[] fileData, string ext, string cacheKey)
   {
     Texture2D tex;
@@ -137,6 +168,7 @@ public class Display : MonoBehaviour
     else
     {
       tex = new Texture2D(2, 2);
+
       if (!tex.LoadImage(fileData))
       {
         Destroy(tex);
@@ -159,13 +191,15 @@ public class Display : MonoBehaviour
   }
 
   // ================= GIF =================
+
   private IEnumerator LoadGifInternal(byte[] fileData, string cacheKey)
   {
     yield return UniGif.GetTextureListCoroutine(
       fileData,
       (textures, loopCount, width, height) =>
       {
-        if (textures == null || textures.Count == 0) return;
+        if (textures == null || textures.Count == 0)
+          return;
 
         _gifTextures = new Texture2D[textures.Count];
         _gifDelays = new float[textures.Count];
@@ -185,65 +219,108 @@ public class Display : MonoBehaviour
 
         isLoaded = true;
         OnGifLoaded?.Invoke();
-      }
-    );
+      });
   }
 
   // ================= PLAY =================
+
   private void StartPlayback()
   {
-    if (_playCoroutine != null)
-      StopCoroutine(_playCoroutine);
+    if (!HasTexture)
+      return;
 
-    if (_gifTextures == null || _gifTextures.Length <= 1)
+    StopPlayback();
+
+    if (_frameIndex >= _gifTextures.Length)
+      _frameIndex = 0;
+
+    if (_gifTextures.Length == 1)
     {
-      ApplyTexture(_gifTextures?[0]);
+      ApplyTexture(_gifTextures[0]);
       return;
     }
 
     _isPlaying = true;
-    _frameIndex = 0;
-
     _playCoroutine = StartCoroutine(PlayLoop());
   }
 
   private IEnumerator PlayLoop()
   {
-    while (_isPlaying && _gifTextures != null)
+    while (_isPlaying)
     {
       ApplyTexture(_gifTextures[_frameIndex]);
 
-      yield return new WaitForSecondsRealtime(_gifDelays[_frameIndex]);
+      float delay = _gifDelays[_frameIndex];
+      float timer = 0f;
 
-      _frameIndex = (_frameIndex + 1) % _gifTextures.Length;
+      while (timer < delay)
+      {
+        timer += Time.unscaledDeltaTime;
+        yield return null;
+      }
+
+      _frameIndex++;
+
+      if (_frameIndex >= _gifTextures.Length)
+        _frameIndex = 0;
     }
+
+    _playCoroutine = null;
   }
 
   private void ApplyTexture(Texture2D tex)
   {
-    if (!ReferenceEquals(rawImage, null))
-      rawImage.texture = tex;
+    if (ReferenceEquals(rawImage, null))
+      return;
+
+    if (_currentTexture == tex)
+      return;
+
+    _currentTexture = tex;
+    rawImage.texture = tex;
   }
 
   public Texture2D PreviewTexture
   {
     get
     {
-      if (_gifTextures != null && _gifTextures.Length > 0)
+      if (HasTexture)
         return _gifTextures[0];
+
       return null;
     }
   }
 
   // ================= CACHE =================
+
   private void AddCache(string key)
   {
-    if (GifCache.Count > MaxCache)
+    // 已存在则直接更新
+    if (GifCache.ContainsKey(key))
     {
-      var first = GifCache.Keys.First();
-      Release(GifCache[first].Textures);
-      GifCache.Remove(first);
+      GifCache[key] = new CachedGif
+      {
+        Textures = _gifTextures,
+        Delays = _gifDelays,
+        Width = gifWidth,
+        Height = gifHeight
+      };
+      return;
     }
+
+    // FIFO 淘汰
+    while (GifCache.Count >= MaxCache)
+    {
+      string oldest = CacheOrder[0];
+      CacheOrder.RemoveAt(0);
+      if (GifCache.TryGetValue(oldest, out var old))
+      {
+        Release(old.Textures);
+        GifCache.Remove(oldest);
+      }
+    }
+
+    CacheOrder.Add(key);
 
     GifCache[key] = new CachedGif
     {
@@ -258,27 +335,39 @@ public class Display : MonoBehaviour
   {
     _gifTextures = cached.Textures;
     _gifDelays = cached.Delays;
+
     gifWidth = cached.Width;
     gifHeight = cached.Height;
 
-    ApplyTexture(_gifTextures[0]);
-    StartPlayback();
+    if (_gifTextures.Length == 1)
+    {
+      ApplyTexture(_gifTextures[0]);
+    }
+    else
+    {
+      StartPlayback();
+    }
 
     isLoaded = true;
     OnGifLoaded?.Invoke();
   }
 
   // ================= RELEASE =================
+
   private void Release(Texture2D[] textures)
   {
-    if (textures == null) return;
+    if (textures == null)
+      return;
 
-    foreach (var t in textures)
-      if (!ReferenceEquals(t, null))
-        Destroy(t);
+    foreach (var tex in textures)
+    {
+      if (!ReferenceEquals(tex, null))
+        Destroy(tex);
+    }
   }
 
   // ================= RELOAD =================
+
   public void Reload(bool force = false)
   {
     if (force && GifCache.TryGetValue(localPath, out var cached))
@@ -287,27 +376,48 @@ public class Display : MonoBehaviour
       GifCache.Remove(localPath);
     }
 
-    // 强制激活对象，以便协程启动
     if (!gameObject.activeInHierarchy)
       gameObject.SetActive(true);
 
-    isLoaded = false; // 重置加载状态
-    StopAllCoroutines();
-    StartCoroutine(LoadGif());
+    isLoaded = false;
+
+    _currentTexture = null;
+    _frameIndex = 0;
+
+    StopPlayback();
+
+    if (_loadCoroutine != null)
+    {
+      StopCoroutine(_loadCoroutine);
+      _loadCoroutine = null;
+    }
+
+    _loadCoroutine = StartCoroutine(LoadGif());
   }
 
   void OnDestroy()
   {
-    _isPlaying = false;
+    StopPlayback();
 
-    if (_playCoroutine != null)
-      StopCoroutine(_playCoroutine);
+    if (_loadCoroutine != null)
+    {
+      StopCoroutine(_loadCoroutine);
+      _loadCoroutine = null;
+    }
+
+    _currentTexture = null;
+    _gifTextures = null;
+    _gifDelays = null;
   }
 
   void OnApplicationQuit()
   {
-    foreach (var kv in GifCache)
-      Release(kv.Value.Textures);
+    foreach (var cached in GifCache.Values)
+    {
+      Release(cached.Textures);
+    }
+
     GifCache.Clear();
+    CacheOrder.Clear();
   }
 }

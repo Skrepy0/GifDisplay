@@ -33,6 +33,12 @@ namespace GifDisplay
     private static bool loading;
     private static bool isReloading;
 
+    // 控制器缓存与查找优化
+    private static scrController cachedController;
+    private static int findControllerFrameCounter;
+    private static bool controllerNotFound;
+    private static int stateUpdateCounter;
+
     public static bool Load(UnityModManager.ModEntry entry)
     {
       modEntry = entry;
@@ -88,8 +94,12 @@ namespace GifDisplay
         UpdateAllInstances();
       }
 
-      UpdateGamePlayState();
-      ApplyVisibilityRules();
+      stateUpdateCounter++;
+      if (stateUpdateCounter % 5 == 0)
+      {
+        UpdateGamePlayState();
+        ApplyVisibilityRules();
+      }
     }
 
     private static bool OnUnload(UnityModManager.ModEntry entry)
@@ -480,76 +490,86 @@ namespace GifDisplay
         UpdateInstanceTransform(inst);
     }
 
+    // ---------- 游戏状态检测（优化版） ----------
     private static void UpdateGamePlayState()
     {
-      bool newState;
+      // 如果已确定找不到控制器，每隔 30 帧重试一次
+      if (controllerNotFound)
+      {
+        findControllerFrameCounter++;
+        if (findControllerFrameCounter % 30 != 0)
+          return;
+        findControllerFrameCounter = 0;
+      }
+
+      bool newState = false;
       try
       {
-        // 尝试获取 scrController
-        GameObject controllerGo = GameObject.Find("scrController");
-        if (controllerGo == null)
+        if (cachedController == null)
         {
-          var controllerComp = Object.FindFirstObjectByType<scrController>();
-          if (controllerComp != null)
-            controllerGo = controllerComp.gameObject;
-        }
-
-        if (controllerGo != null)
-        {
-          var controller = controllerGo.GetComponent<scrController>();
-          if (controller != null)
+          // 尝试获取 scrController
+          GameObject controllerGo = GameObject.Find("scrController");
+          if (controllerGo == null)
           {
-            // 如果尚未找到 gameplayField，进行一次反射查找
-            if (gameplayField == null && !reflectionFailed)
-            {
-              var fields =
-                typeof(scrController).GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-              foreach (var f in fields)
-              {
-                if (f.FieldType == typeof(bool) &&
-                    (f.Name.ToLower().Contains("play") ||
-                     f.Name.ToLower().Contains("active") ||
-                     f.Name.ToLower().Contains("game")))
-                {
-                  gameplayField = f;
-                  modEntry.Logger.Log($"Found gameplay field: '{f.Name}'");
-                  break;
-                }
-              }
+            var controllerComp = Object.FindFirstObjectByType<scrController>();
+            if (controllerComp != null)
+              controllerGo = controllerComp.gameObject;
+          }
 
-              if (gameplayField == null)
-              {
-                reflectionFailed = true;
-                modEntry.Logger.Log("No boolean field with 'play'/'active'/'game' found.");
-              }
-            }
-
-            if (gameplayField != null)
+          if (controllerGo != null)
+          {
+            cachedController = controllerGo.GetComponent<scrController>();
+            if (cachedController == null)
             {
-              newState = (bool)gameplayField.GetValue(controller);
-            }
-            else
-            {
-              // 反射失败，默认假设游戏正在播放（让图片显示）
-              newState = true;
+              controllerNotFound = true;
+              return;
             }
           }
           else
           {
-            // 未找到 scrController 组件，认为不在游戏中
-            newState = false;
+            controllerNotFound = true;
+            return;
           }
         }
-        else
+
+        // 反射字段查找（仅一次）
+        if (gameplayField == null && !reflectionFailed)
         {
-          // 未找到 scrController 对象，认为不在游戏中
-          newState = false;
+          var fields =
+            typeof(scrController).GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+          foreach (var f in fields)
+          {
+            if (f.FieldType == typeof(bool) &&
+                (f.Name.ToLower().Contains("play") ||
+                 f.Name.ToLower().Contains("active") ||
+                 f.Name.ToLower().Contains("game")))
+            {
+              gameplayField = f;
+              modEntry.Logger.Log($"Found gameplay field: '{f.Name}'");
+              break;
+            }
+          }
+
+          if (gameplayField == null)
+          {
+            reflectionFailed = true;
+            modEntry.Logger.Log("No boolean field with 'play'/'active'/'game' found.");
+            return;
+          }
         }
+
+        if (gameplayField != null)
+          newState = (bool)gameplayField.GetValue(cachedController);
+        else
+          newState = true; // 反射失败时默认播放
       }
-      catch (System.Exception ex)
+      catch (Exception ex)
       {
         modEntry.Logger.Log($"Error detecting game state: {ex.Message}");
         newState = false;
+        // 出错时重置缓存，下次重新查找
+        cachedController = null;
+        controllerNotFound = false;
       }
 
       if (newState != isGamePlaying)
@@ -559,40 +579,39 @@ namespace GifDisplay
       }
     }
 
-    // ---------- 应用可见性规则 ----------
+    // ---------- 应用可见性规则（优化版） ----------
     private static void ApplyVisibilityRules()
     {
-      if (loading || ReferenceEquals(canvasObject, null)) return;
+      if (loading || ReferenceEquals(canvasObject, null))
+        return;
 
+      bool anyChange = false;
+
+      // 单次遍历：计算并应用变化
       foreach (var inst in Instances)
       {
-        if (ReferenceEquals(inst.GameObject, null) || ReferenceEquals(inst.Display, null)) continue;
+        if (ReferenceEquals(inst.GameObject, null) || ReferenceEquals(inst.Display, null))
+          continue;
 
-        bool shouldShow;
-        if (!inst.Display.isLoaded)
+        bool shouldShow = true;
+        if (inst.Display.isLoaded && inst.Settings.ShowOnlyDuringPlay)
         {
-          shouldShow = true;
-        }
-        else
-        {
-          shouldShow = true;
-          if (inst.Settings.ShowOnlyDuringPlay)
-          {
-            shouldShow = isGamePlaying;
-          }
+          shouldShow = isGamePlaying;
         }
 
         if (inst.GameObject.activeSelf != shouldShow)
         {
           inst.GameObject.SetActive(shouldShow);
           if (shouldShow)
-          {
             inst.Display.Resume();
-          }
-
-          modEntry.Logger.Log(
-            $"Instance {inst.Settings.PicGifPath} visibility changed to {shouldShow} (IsLoaded={inst.Display.isLoaded})");
+          anyChange = true;
         }
+      }
+
+      // 如果发生了任何变化，输出一条汇总日志（避免刷屏）
+      if (anyChange)
+      {
+        modEntry.Logger.Log("Visibility updated for some instances.");
       }
     }
 
@@ -620,7 +639,6 @@ namespace GifDisplay
         string json = File.ReadAllText(settingsPath);
         JObject root = JObject.Parse(json);
 
-        // 读取语言
         if (root.TryGetValue("language", out JToken langToken))
         {
           string lang = langToken.Value<string>();
@@ -628,7 +646,6 @@ namespace GifDisplay
             I18n.Lang = lang;
         }
 
-        // 读取实例列表
         if (root.TryGetValue("instances", out JToken instancesToken))
         {
           var list = instancesToken.ToObject<List<SettingsData>>();
@@ -641,7 +658,7 @@ namespace GifDisplay
       }
       catch (Exception ex)
       {
-        // 兼容旧格式（纯数组）
+        // 兼容旧格式
         try
         {
           string json = File.ReadAllText(settingsPath);
