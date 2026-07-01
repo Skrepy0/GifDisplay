@@ -1,6 +1,9 @@
 chcp 65001 > $null
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
 $src = 'D:\csp\GifDisplay\GifDisplay\bin\Debug\GifDisplay.dll'
+$srcInfo = 'D:\csp\GifDisplay\Info.json'
+$srcLang = 'D:\csp\GifDisplay\lang'
 $destDir = 'D:\Program Files (x86)\Steam\steamapps\common\A Dance of Fire and Ice\Mods\GifDisplay'
 $destFile = Join-Path $destDir 'GifDisplay.dll'
 $exe = 'D:\Program Files (x86)\Steam\steamapps\common\A Dance of Fire and Ice\A Dance of Fire and Ice.exe'
@@ -47,20 +50,17 @@ function Write-ColorLogLine($line)
     if ($line -match '^\[([^\]]+)\]')
     {
         $rawMod = $Matches[1]
-        # 提取模组名：按空格、斜杠、冒号分割取第一个单词
         $modName = ($rawMod -split '[\s/:]+')[0]
         $modColor = Get-ModColor $modName
 
-        # 直接找到第一个 ']' 的位置，确保分割准确
         $closeBracket = $line.IndexOf(']')
         if ($closeBracket -gt 0)
         {
-            $modPart = $line.Substring(0, $closeBracket + 1)   # 包含 ']'
+            $modPart = $line.Substring(0, $closeBracket + 1)
             $rest = $line.Substring($closeBracket + 1)
         }
         else
         {
-            # 容错：如果没找到，按原逻辑
             $modPart = $Matches[0]
             $rest = $line.Substring($modPart.Length)
         }
@@ -81,11 +81,14 @@ function Write-Color($text, $color)
     Write-Host $text -ForegroundColor $color
 }
 
+# 确保目标目录存在
 if (-not (Test-Path $destDir))
 {
     New-Item -ItemType Directory -Path $destDir -Force | Out-Null
     Write-Color '[WARN] Target directory created' Yellow
 }
+
+# 复制 DLL
 Copy-Item -Path $src -Destination $destFile -Force
 if ($?)
 {
@@ -96,6 +99,28 @@ else
     Write-Color '[ERROR] Copy failed' Red
     Read-Host 'Press Enter to exit'
     exit 1
+}
+
+# 复制 Info.json
+if (Test-Path $srcInfo)
+{
+    Copy-Item -Path $srcInfo -Destination $destDir -Force
+    Write-Color '[SUCCESS] Info.json copied' Green
+}
+else
+{
+    Write-Color '[WARN] Info.json not found' Yellow
+}
+
+# 复制 lang 文件夹
+if (Test-Path $srcLang)
+{
+    Copy-Item -Path $srcLang -Destination $destDir -Recurse -Force
+    Write-Color '[SUCCESS] lang folder copied' Green
+}
+else
+{
+    Write-Color '[WARN] lang folder not found' Yellow
 }
 
 Write-Color '[INFO] Launching game...' Cyan

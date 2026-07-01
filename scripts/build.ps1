@@ -5,7 +5,8 @@ $SourceRoot = "D:\csp\GifDisplay"          # Root path of your mod project
 $FilesToZip = @(
     "$SourceRoot\packages\JALib\JALib.dll",
     "$SourceRoot\GifDisplay\bin\Release\GifDisplay.dll",
-    "$SourceRoot\Info.json"
+    "$SourceRoot\Info.json",
+    "$SourceRoot\lang"           
 )
 
 $OutputDir = "$SourceRoot\dist"                   # Where to save the resulting .zip
