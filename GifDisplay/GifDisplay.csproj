@@ -502,9 +502,12 @@
         </Reference>
     </ItemGroup>
     <ItemGroup>
+        <Compile Include="CanvasSizeListener.cs" />
         <Compile Include="Display.cs" />
+        <Compile Include="ImageInstance.cs" />
         <Compile Include="Main.cs" />
         <Compile Include="Properties\AssemblyInfo.cs"/>
+        <Compile Include="SettingsData.cs" />
         <Compile Include="UniGif\UniGif.cs" />
         <Compile Include="UniGif\UniGifConst.cs" />
         <Compile Include="UniGif\UniGifDecoder.cs" />

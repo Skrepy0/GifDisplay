@@ -4,57 +4,22 @@ using UnityEngine.UI;
 using System.IO;
 using System.Collections.Generic;
 using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
 
 namespace GifDisplay
 {
-  public class SettingsData
-  {
-    public float PosX;
-    public float PosY;
-    public float Scale = 1.0f;
-    public float Opacity = 1.0f;
-    public string PicGifPath = "";
-  }
-
-  public class ImageInstance
-  {
-    public GameObject GameObject;
-    public Display Display;
-    public SettingsData Settings;
-    public string PosXStr;
-    public string PosYStr;
-    public string ScaleStr;
-    public string OpacityStr;
-    public bool ConfirmDelete;
-
-    public ImageInstance(SettingsData data)
-    {
-      Settings = data;
-      UpdateStrings();
-    }
-
-    public void UpdateStrings()
-    {
-      PosXStr = Settings.PosX.ToString("F1") + "%";
-      PosYStr = Settings.PosY.ToString("F1") + "%";
-      ScaleStr = Settings.Scale.ToString("F2");
-      OpacityStr = Settings.Opacity.ToString("F2");
-    }
-  }
-
   public class Main
   {
     private static UnityModManager.ModEntry modEntry;
     private static GameObject canvasObject;
-    private static List<ImageInstance> instances = new();
+    private static Canvas canvas;
+    private static CanvasScaler canvasScaler;
+    private static readonly List<ImageInstance> Instances = new();
     private static string settingsPath;
     private static string newImagePath = "";
-    private static int lastScreenWidth;
-    private static int lastScreenHeight;
 
-    private static int sortingOrder = 9;
-    private static string sortingOrderStr = "9";
+    private static float cachedLogicalWidth;
+    private static float cachedLogicalHeight;
+    private static bool needUpdate;
 
     public static bool Load(UnityModManager.ModEntry entry)
     {
@@ -74,22 +39,20 @@ namespace GifDisplay
         return false;
       }
 
-      lastScreenWidth = Screen.width;
-      lastScreenHeight = Screen.height;
-
       LoadSettings();
 
-      if (instances.Count == 0)
+      if (Instances.Count == 0)
       {
-        var defaultData = new SettingsData { PicGifPath = "", PosX = 0, PosY = 0, Scale = 1f, Opacity = 1f };
+        var defaultData = new SettingsData
+          { PicGifPath = "", PosX = 0, PosY = 0, Scale = 1f, Opacity = 1f, SortingOrder = 0 };
         CreateInstance(defaultData);
         SaveSettings();
       }
 
-      // 应用排序
-      ApplySortingOrder();
+      UpdateCachedLogicalSize();
+      UpdateAllInstances();
 
-      modEntry.Logger.Log($"GifDisplay Mod loaded with {instances.Count} instances");
+      modEntry.Logger.Log($"GifDisplay Mod loaded with {Instances.Count} instances");
       return true;
     }
 
@@ -102,20 +65,20 @@ namespace GifDisplay
 
     private static void OnUpdate(UnityModManager.ModEntry entry, float delta)
     {
-      if (Screen.width != lastScreenWidth || Screen.height != lastScreenHeight)
+      if (needUpdate)
       {
-        lastScreenWidth = Screen.width;
-        lastScreenHeight = Screen.height;
+        needUpdate = false;
+        UpdateCachedLogicalSize();
         UpdateAllInstances();
       }
     }
 
     private static bool OnUnload(UnityModManager.ModEntry entry)
     {
-      foreach (var inst in instances)
+      foreach (var inst in Instances)
         if (inst.GameObject != null)
           Object.Destroy(inst.GameObject);
-      instances.Clear();
+      Instances.Clear();
       if (canvasObject != null)
         Object.Destroy(canvasObject);
       return true;
@@ -127,27 +90,6 @@ namespace GifDisplay
       if (!modEntry.Active) return;
 
       GUILayout.BeginVertical("box", GUILayout.Width(2000));
-
-      GUILayout.BeginHorizontal();
-      GUILayout.Label("Sorting Order", GUILayout.Width(200));
-      string newOrderStr = GUILayout.TextField(sortingOrderStr, GUILayout.Width(150));
-      if (newOrderStr != sortingOrderStr)
-      {
-        if (int.TryParse(newOrderStr, out int newOrder))
-        {
-          sortingOrder = newOrder;
-          sortingOrderStr = newOrderStr;
-          ApplySortingOrder();
-          SaveSettings();
-        }
-        else
-        {
-          sortingOrderStr = sortingOrder.ToString();
-        }
-      }
-
-      GUILayout.Label("(negative = behind, positive = in front)", GUILayout.Width(300));
-      GUILayout.EndHorizontal();
 
       GUILayout.Label("Add New Image", GUILayout.Width(500));
       GUILayout.BeginHorizontal();
@@ -163,12 +105,13 @@ namespace GifDisplay
             PosX = 0f,
             PosY = 0f,
             Scale = 1f,
-            Opacity = 1f
+            Opacity = 1f,
+            SortingOrder = 0
           };
-          if (instances.Count > 0)
+          if (Instances.Count > 0)
           {
-            data.PosX = Mathf.Clamp(instances[instances.Count - 1].Settings.PosX + 10, -100, 100);
-            data.PosY = Mathf.Clamp(instances[instances.Count - 1].Settings.PosY + 10, -100, 100);
+            data.PosX = Mathf.Clamp(Instances[Instances.Count - 1].Settings.PosX + 10, -100, 100);
+            data.PosY = Mathf.Clamp(Instances[Instances.Count - 1].Settings.PosY + 10, -100, 100);
           }
 
           CreateInstance(data);
@@ -184,9 +127,9 @@ namespace GifDisplay
       GUILayout.EndHorizontal();
 
       // ---- 图片列表 ----
-      for (int i = 0; i < instances.Count; i++)
+      for (int i = 0; i < Instances.Count; i++)
       {
-        var inst = instances[i];
+        var inst = Instances[i];
         var settings = inst.Settings;
         bool changed = false;
 
@@ -196,7 +139,7 @@ namespace GifDisplay
         // 路径 + 重载
         GUILayout.BeginHorizontal();
         GUILayout.Label("Path:", GUILayout.Width(100));
-        GUILayout.Label(settings.PicGifPath, GUILayout.Width(650));
+        GUILayout.Label(settings.PicGifPath, GUILayout.Width(750));
         if (GUILayout.Button("Reload", GUILayout.Width(150)))
         {
           inst.Display.localPath = settings.PicGifPath;
@@ -209,7 +152,7 @@ namespace GifDisplay
         // X
         GUILayout.BeginHorizontal();
         GUILayout.Label("X (%)", GUILayout.Width(150));
-        float newX = GUILayout.HorizontalSlider(settings.PosX, -100f, 100f, GUILayout.Width(550));
+        float newX = GUILayout.HorizontalSlider(settings.PosX, -100f, 100f, GUILayout.Width(850));
         if (newX != settings.PosX)
         {
           settings.PosX = newX;
@@ -223,7 +166,7 @@ namespace GifDisplay
         // Y
         GUILayout.BeginHorizontal();
         GUILayout.Label("Y (%)", GUILayout.Width(150));
-        float newY = GUILayout.HorizontalSlider(settings.PosY, -100f, 100f, GUILayout.Width(550));
+        float newY = GUILayout.HorizontalSlider(settings.PosY, -100f, 100f, GUILayout.Width(850));
         if (newY != settings.PosY)
         {
           settings.PosY = newY;
@@ -237,7 +180,7 @@ namespace GifDisplay
         // Scale
         GUILayout.BeginHorizontal();
         GUILayout.Label("Scale", GUILayout.Width(150));
-        float newScale = GUILayout.HorizontalSlider(settings.Scale, 0.1f, 3f, GUILayout.Width(550));
+        float newScale = GUILayout.HorizontalSlider(settings.Scale, 0.1f, 3f, GUILayout.Width(850));
         if (newScale != settings.Scale)
         {
           settings.Scale = newScale;
@@ -251,7 +194,7 @@ namespace GifDisplay
         // Opacity
         GUILayout.BeginHorizontal();
         GUILayout.Label("Opacity", GUILayout.Width(150));
-        float newOpacity = GUILayout.HorizontalSlider(settings.Opacity, 0f, 1f, GUILayout.Width(550));
+        float newOpacity = GUILayout.HorizontalSlider(settings.Opacity, 0f, 1f, GUILayout.Width(850));
         if (newOpacity != settings.Opacity)
         {
           settings.Opacity = newOpacity;
@@ -260,6 +203,28 @@ namespace GifDisplay
         }
 
         GUILayout.Label(inst.OpacityStr, GUILayout.Width(100));
+        GUILayout.EndHorizontal();
+
+        // Sorting Order (独立)
+        GUILayout.BeginHorizontal();
+        GUILayout.Label("Sorting Order", GUILayout.Width(250));
+        string newSortStr = GUILayout.TextField(inst.SortingOrderStr, GUILayout.Width(100));
+        if (newSortStr != inst.SortingOrderStr)
+        {
+          if (int.TryParse(newSortStr, out int newSort))
+          {
+            settings.SortingOrder = newSort;
+            inst.SortingOrderStr = newSortStr;
+            UpdateInstanceSorting(inst);
+            changed = true;
+          }
+          else
+          {
+            inst.SortingOrderStr = settings.SortingOrder.ToString();
+          }
+        }
+
+        GUILayout.Label("(higher = in front)", GUILayout.Width(550));
         GUILayout.EndHorizontal();
 
         // 删除
@@ -276,7 +241,7 @@ namespace GifDisplay
           {
             if (inst.GameObject != null)
               Object.Destroy(inst.GameObject);
-            instances.RemoveAt(i);
+            Instances.RemoveAt(i);
             SaveSettings();
             GUILayout.EndVertical();
             break;
@@ -306,7 +271,7 @@ namespace GifDisplay
 
       canvasObject = new GameObject("GifDisplayCanvas");
       canvasObject.SetActive(true);
-      var canvas = canvasObject.AddComponent<Canvas>();
+      canvas = canvasObject.AddComponent<Canvas>();
       if (canvas == null)
       {
         modEntry.Logger.Log("Failed to add Canvas");
@@ -314,26 +279,33 @@ namespace GifDisplay
       }
 
       canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-      // 排序将在 ApplySortingOrder 中设置
 
-      var scaler = canvasObject.AddComponent<CanvasScaler>();
-      scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-      scaler.referenceResolution = new Vector2(1920, 1080);
-      scaler.matchWidthOrHeight = 0.5f;
+      canvasScaler = canvasObject.AddComponent<CanvasScaler>();
+      canvasScaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+      canvasScaler.referenceResolution = new Vector2(1920, 1080);
+      canvasScaler.matchWidthOrHeight = 0.5f;
+
+      // 尺寸监听
+      var listener = canvasObject.AddComponent<CanvasSizeListener>();
+      listener.OnSizeChanged += () => { needUpdate = true; };
 
       Object.DontDestroyOnLoad(canvasObject);
       return true;
     }
 
-    // ---------- 应用排序 ----------
-    private static void ApplySortingOrder()
+    private static void UpdateCachedLogicalSize()
     {
-      if (canvasObject == null) return;
-      var canvas = canvasObject.GetComponent<Canvas>();
-      if (canvas != null)
+      if (canvas == null) return;
+      RectTransform rt = canvas.GetComponent<RectTransform>();
+      if (rt != null)
       {
-        canvas.sortingOrder = sortingOrder;
-        modEntry.Logger.Log($"Applied sortingOrder = {sortingOrder}");
+        cachedLogicalWidth = rt.rect.width;
+        cachedLogicalHeight = rt.rect.height;
+      }
+      else
+      {
+        cachedLogicalWidth = Screen.width / canvas.scaleFactor;
+        cachedLogicalHeight = Screen.height / canvas.scaleFactor;
       }
     }
 
@@ -346,7 +318,15 @@ namespace GifDisplay
 
       var go = new GameObject("GifImage");
       go.transform.SetParent(canvasObject.transform, false);
-      var rect = go.AddComponent<RectTransform>();
+
+      // 子 Canvas（独立排序）
+      var childCanvas = go.AddComponent<Canvas>();
+      childCanvas.overrideSorting = true;
+      childCanvas.sortingOrder = data.SortingOrder;
+
+      var rect = go.GetComponent<RectTransform>();
+      if (rect == null)
+        rect = go.AddComponent<RectTransform>();
       rect.anchorMin = new Vector2(0.5f, 0.5f);
       rect.anchorMax = new Vector2(0.5f, 0.5f);
       rect.pivot = new Vector2(0.5f, 0.5f);
@@ -368,7 +348,16 @@ namespace GifDisplay
       UpdateInstanceTransform(inst);
       inst.GameObject.SetActive(true);
 
-      instances.Add(inst);
+      Instances.Add(inst);
+    }
+
+    // ---------- 更新实例排序 ----------
+    private static void UpdateInstanceSorting(ImageInstance inst)
+    {
+      if (inst.GameObject == null) return;
+      var childCanvas = inst.GameObject.GetComponent<Canvas>();
+      if (childCanvas != null)
+        childCanvas.sortingOrder = inst.Settings.SortingOrder;
     }
 
     // ---------- 变换更新 ----------
@@ -379,11 +368,14 @@ namespace GifDisplay
       var rect = inst.GameObject.GetComponent<RectTransform>();
       var rawImage = inst.GameObject.GetComponent<RawImage>();
 
-      float halfWidth = Screen.width / 2f;
-      float halfHeight = Screen.height / 2f;
-      float xPos = (inst.Settings.PosX / 100f) * halfWidth;
-      float yPos = (inst.Settings.PosY / 100f) * halfHeight;
-      rect.anchoredPosition = new Vector2(xPos, yPos);
+      rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 0.5f);
+
+      float percentX = inst.Settings.PosX / 100f;
+      float percentY = inst.Settings.PosY / 100f;
+
+      float xOffset = (percentX - 0.5f) * cachedLogicalWidth;
+      float yOffset = (percentY - 0.5f) * cachedLogicalHeight;
+      rect.anchoredPosition = new Vector2(xOffset, yOffset);
 
       if (inst.Display.gifWidth > 0 && inst.Display.gifHeight > 0)
       {
@@ -406,26 +398,21 @@ namespace GifDisplay
 
     private static void UpdateAllInstances()
     {
-      foreach (var inst in instances)
+      foreach (var inst in Instances)
         UpdateInstanceTransform(inst);
     }
 
-    // ---------- 保存/加载（支持新格式） ----------
+    // ---------- 保存/加载 ----------
     private static void SaveSettings()
     {
       if (string.IsNullOrEmpty(settingsPath)) return;
 
-      JObject root = new JObject();
-      root["sortingOrder"] = sortingOrder;
-
       var list = new List<SettingsData>();
-      foreach (var inst in instances)
+      foreach (var inst in Instances)
         list.Add(inst.Settings);
 
-      string instancesJson = JsonConvert.SerializeObject(list, Formatting.Indented);
-      root["instances"] = JArray.Parse(instancesJson);
-
-      File.WriteAllText(settingsPath, root.ToString(Formatting.Indented));
+      string json = JsonConvert.SerializeObject(list, Formatting.Indented);
+      File.WriteAllText(settingsPath, json);
     }
 
     private static void LoadSettings()
@@ -434,52 +421,25 @@ namespace GifDisplay
       try
       {
         string json = File.ReadAllText(settingsPath);
-        JObject root = JObject.Parse(json);
-
-        // 读取排序
-        if (root.TryGetValue("sortingOrder", out JToken orderToken))
+        var list = JsonConvert.DeserializeObject<List<SettingsData>>(json);
+        if (list != null)
         {
-          sortingOrder = orderToken.Value<int>();
-          sortingOrderStr = sortingOrder.ToString();
-        }
-
-        // 读取实例列表
-        if (root.TryGetValue("instances", out JToken instancesToken))
-        {
-          var list = instancesToken.ToObject<List<SettingsData>>();
-          if (list != null)
-          {
-            foreach (var data in list)
-              CreateInstance(data);
-          }
+          foreach (var data in list)
+            CreateInstance(data);
         }
       }
       catch (System.Exception ex)
       {
         modEntry.Logger.Log($"LoadSettings error: {ex.Message}");
-        try
-        {
-          string json = File.ReadAllText(settingsPath);
-          var list = JsonConvert.DeserializeObject<List<SettingsData>>(json);
-          if (list != null)
-          {
-            foreach (var data in list)
-              CreateInstance(data);
-          }
-        }
-        catch
-        {
-          modEntry.Logger.Log("Failed to load settings with old format.");
-        }
       }
     }
 
     public static void ClearAll()
     {
-      foreach (var inst in instances)
+      foreach (var inst in Instances)
         if (inst.GameObject != null)
           Object.Destroy(inst.GameObject);
-      instances.Clear();
+      Instances.Clear();
     }
   }
 }
