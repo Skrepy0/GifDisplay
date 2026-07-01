@@ -4,6 +4,7 @@ using UnityEngine.UI;
 using System.IO;
 using System.Collections.Generic;
 using Newtonsoft.Json;
+using System.Reflection;
 
 namespace GifDisplay
 {
@@ -20,6 +21,13 @@ namespace GifDisplay
     private static float cachedLogicalWidth;
     private static float cachedLogicalHeight;
     private static bool needUpdate;
+
+    private static bool isGamePlaying;
+    private static FieldInfo gameplayField;
+    private static bool reflectionFailed;
+
+    private static bool loading;
+    private static bool isReloading;
 
     public static bool Load(UnityModManager.ModEntry entry)
     {
@@ -39,11 +47,17 @@ namespace GifDisplay
         return false;
       }
 
+      loading = true;
       LoadSettings();
+      loading = false;
 
       UpdateCachedLogicalSize();
       UpdateAllInstances();
 
+      UpdateGamePlayState();
+      ApplyVisibilityRules();
+
+      modEntry.Logger.Log($"Initial game playing state: {isGamePlaying}, instances: {Instances.Count}");
       modEntry.Logger.Log($"GifDisplay Mod loaded with {Instances.Count} instances");
       return true;
     }
@@ -51,7 +65,11 @@ namespace GifDisplay
     private static bool OnToggle(UnityModManager.ModEntry entry, bool enable)
     {
       if (canvasObject != null)
+      {
         canvasObject.SetActive(enable);
+        modEntry.Logger.Log($"Canvas toggled to {enable}");
+      }
+
       return true;
     }
 
@@ -63,6 +81,9 @@ namespace GifDisplay
         UpdateCachedLogicalSize();
         UpdateAllInstances();
       }
+
+      UpdateGamePlayState();
+      ApplyVisibilityRules();
     }
 
     private static bool OnUnload(UnityModManager.ModEntry entry)
@@ -93,14 +114,9 @@ namespace GifDisplay
         if (!string.IsNullOrEmpty(newImagePath))
         {
           if (newImagePath.StartsWith('"'))
-          {
             newImagePath = newImagePath.Substring(1);
-          }
-
           if (newImagePath.EndsWith('"'))
-          {
             newImagePath = newImagePath.Substring(0, newImagePath.Length - 1);
-          }
         }
 
         if (!string.IsNullOrEmpty(newImagePath) && File.Exists(newImagePath))
@@ -112,7 +128,8 @@ namespace GifDisplay
             PosY = 0f,
             Scale = 1f,
             Opacity = 1f,
-            SortingOrder = 9
+            SortingOrder = 9,
+            ShowOnlyDuringPlay = true
           };
           if (Instances.Count > 0)
           {
@@ -148,6 +165,7 @@ namespace GifDisplay
         GUILayout.Label(settings.PicGifPath, GUILayout.Width(750));
         if (GUILayout.Button("Reload", GUILayout.Width(150)))
         {
+          isReloading = true;
           inst.Display.localPath = settings.PicGifPath;
           inst.Display.Reload(true);
           inst.ConfirmDelete = false;
@@ -155,20 +173,16 @@ namespace GifDisplay
 
         GUILayout.EndHorizontal();
 
+        // 预览
         GUILayout.BeginHorizontal();
         GUILayout.Label("Preview:", GUILayout.Width(120));
         Texture tex = null;
-        if (inst.Display != null && inst.Display.rawImage != null)
-          tex = inst.Display.rawImage.texture;
+        if (inst.Display != null)
+          tex = inst.Display.PreviewTexture;
         if (tex != null)
-        {
           GUILayout.Box(new GUIContent(tex), GUILayout.Width(100), GUILayout.Height(100));
-        }
         else
-        {
           GUILayout.Box("No Image", GUILayout.Width(100), GUILayout.Height(100));
-        }
-
         GUILayout.FlexibleSpace();
         GUILayout.EndHorizontal();
 
@@ -228,7 +242,7 @@ namespace GifDisplay
         GUILayout.Label(inst.OpacityStr, GUILayout.Width(100));
         GUILayout.EndHorizontal();
 
-        // Sorting Order (独立)
+        // Sorting Order
         GUILayout.BeginHorizontal();
         GUILayout.Label("Sorting Order", GUILayout.Width(250));
         string newSortStr = GUILayout.TextField(inst.SortingOrderStr, GUILayout.Width(100));
@@ -248,6 +262,19 @@ namespace GifDisplay
         }
 
         GUILayout.Label("(higher = in front)", GUILayout.Width(550));
+        GUILayout.EndHorizontal();
+
+        // Show only during play
+        GUILayout.BeginHorizontal();
+        GUILayout.Label("Show only during play", GUILayout.Width(400));
+        bool newShowOnly = GUILayout.Toggle(settings.ShowOnlyDuringPlay, "");
+        if (newShowOnly != settings.ShowOnlyDuringPlay)
+        {
+          settings.ShowOnlyDuringPlay = newShowOnly;
+          changed = true;
+        }
+
+        GUILayout.FlexibleSpace();
         GUILayout.EndHorizontal();
 
         // 删除
@@ -281,6 +308,7 @@ namespace GifDisplay
         {
           UpdateInstanceTransform(inst);
           SaveSettings();
+          ApplyVisibilityRules();
         }
       }
 
@@ -308,7 +336,6 @@ namespace GifDisplay
       canvasScaler.referenceResolution = new Vector2(1920, 1080);
       canvasScaler.matchWidthOrHeight = 0.5f;
 
-      // 尺寸监听
       var listener = canvasObject.AddComponent<CanvasSizeListener>();
       listener.OnSizeChanged += () => { needUpdate = true; };
 
@@ -341,8 +368,8 @@ namespace GifDisplay
 
       var go = new GameObject("GifImage");
       go.transform.SetParent(canvasObject.transform, false);
+      go.SetActive(true);
 
-      // 子 Canvas（独立排序）
       var childCanvas = go.AddComponent<Canvas>();
       childCanvas.overrideSorting = true;
       childCanvas.sortingOrder = data.SortingOrder;
@@ -363,14 +390,19 @@ namespace GifDisplay
       inst.GameObject = go;
       inst.Display = display;
 
-      display.OnGifLoaded += () => UpdateInstanceTransform(inst);
+      display.OnGifLoaded += () =>
+      {
+        UpdateInstanceTransform(inst);
+        if (!loading && !isReloading)
+          ApplyVisibilityRules();
+        if (isReloading)
+          isReloading = false;
+      };
 
       display.localPath = data.PicGifPath;
       display.Reload(true);
 
       UpdateInstanceTransform(inst);
-      inst.GameObject.SetActive(true);
-
       Instances.Add(inst);
     }
 
@@ -423,6 +455,122 @@ namespace GifDisplay
     {
       foreach (var inst in Instances)
         UpdateInstanceTransform(inst);
+    }
+
+    private static void UpdateGamePlayState()
+    {
+      bool newState;
+      try
+      {
+        // 尝试获取 scrController
+        GameObject controllerGo = GameObject.Find("scrController");
+        if (controllerGo == null)
+        {
+          var controllerComp = Object.FindFirstObjectByType<scrController>();
+          if (controllerComp != null)
+            controllerGo = controllerComp.gameObject;
+        }
+
+        if (controllerGo != null)
+        {
+          var controller = controllerGo.GetComponent<scrController>();
+          if (controller != null)
+          {
+            // 如果尚未找到 gameplayField，进行一次反射查找
+            if (gameplayField == null && !reflectionFailed)
+            {
+              var fields =
+                typeof(scrController).GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+              foreach (var f in fields)
+              {
+                if (f.FieldType == typeof(bool) &&
+                    (f.Name.ToLower().Contains("play") ||
+                     f.Name.ToLower().Contains("active") ||
+                     f.Name.ToLower().Contains("game")))
+                {
+                  gameplayField = f;
+                  modEntry.Logger.Log($"Found gameplay field: '{f.Name}'");
+                  break;
+                }
+              }
+
+              if (gameplayField == null)
+              {
+                reflectionFailed = true;
+                modEntry.Logger.Log("No boolean field with 'play'/'active'/'game' found.");
+              }
+            }
+
+            if (gameplayField != null)
+            {
+              newState = (bool)gameplayField.GetValue(controller);
+            }
+            else
+            {
+              // 反射失败，默认假设游戏正在播放（让图片显示）
+              newState = true;
+            }
+          }
+          else
+          {
+            // 未找到 scrController 组件，认为不在游戏中
+            newState = false;
+          }
+        }
+        else
+        {
+          // 未找到 scrController 对象，认为不在游戏中
+          newState = false;
+        }
+      }
+      catch (System.Exception ex)
+      {
+        modEntry.Logger.Log($"Error detecting game state: {ex.Message}");
+        newState = false;
+      }
+
+      if (newState != isGamePlaying)
+      {
+        isGamePlaying = newState;
+        modEntry.Logger.Log($"Game playing state changed to: {isGamePlaying}");
+      }
+    }
+
+    // ---------- 应用可见性规则 ----------
+    private static void ApplyVisibilityRules()
+    {
+      if (loading || ReferenceEquals(canvasObject, null)) return;
+
+      foreach (var inst in Instances)
+      {
+        if (ReferenceEquals(inst.GameObject, null) || ReferenceEquals(inst.Display, null)) continue;
+
+        bool shouldShow;
+        if (!inst.Display.isLoaded)
+        {
+          shouldShow = true;
+        }
+        else
+        {
+          shouldShow = true;
+          if (inst.Settings.ShowOnlyDuringPlay)
+          {
+            shouldShow = isGamePlaying;
+          }
+        }
+
+        if (inst.GameObject.activeSelf != shouldShow)
+        {
+          inst.GameObject.SetActive(shouldShow);
+          if (shouldShow)
+          {
+            inst.Display.Resume();
+          }
+
+          modEntry.Logger.Log(
+            $"Instance {inst.Settings.PicGifPath} visibility changed to {shouldShow} (IsLoaded={inst.Display.isLoaded})");
+        }
+      }
     }
 
     // ---------- 保存/加载 ----------

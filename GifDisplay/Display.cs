@@ -5,7 +5,6 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using GifDisplay;
 
 public class Display : MonoBehaviour
 {
@@ -23,6 +22,8 @@ public class Display : MonoBehaviour
 
   public System.Action OnGifLoaded;
   public static System.Action<string> LogErrorCallback;
+
+  public bool isLoaded { get; private set; }
 
   // ================= CACHE =================
   private class CachedGif
@@ -44,6 +45,30 @@ public class Display : MonoBehaviour
       rawImage = GetComponent<RawImage>();
 
     StartCoroutine(LoadGif());
+  }
+
+  void OnEnable()
+  {
+    if (_gifTextures != null && _gifTextures.Length > 0 && !_isPlaying)
+    {
+      StartPlayback();
+    }
+  }
+
+  void OnDisable()
+  {
+    if (_playCoroutine != null)
+      StopCoroutine(_playCoroutine);
+    _isPlaying = false;
+  }
+
+  // ---------- 外部调用恢复 ----------
+  public void Resume()
+  {
+    if (gameObject.activeInHierarchy && _gifTextures != null && _gifTextures.Length > 0)
+    {
+      StartPlayback();
+    }
   }
 
   // ================= LOAD =================
@@ -129,6 +154,7 @@ public class Display : MonoBehaviour
 
     ApplyTexture(tex);
 
+    isLoaded = true;
     OnGifLoaded?.Invoke();
   }
 
@@ -157,6 +183,7 @@ public class Display : MonoBehaviour
 
         StartPlayback();
 
+        isLoaded = true;
         OnGifLoaded?.Invoke();
       }
     );
@@ -198,6 +225,16 @@ public class Display : MonoBehaviour
       rawImage.texture = tex;
   }
 
+  public Texture2D PreviewTexture
+  {
+    get
+    {
+      if (_gifTextures != null && _gifTextures.Length > 0)
+        return _gifTextures[0];
+      return null;
+    }
+  }
+
   // ================= CACHE =================
   private void AddCache(string key)
   {
@@ -227,6 +264,7 @@ public class Display : MonoBehaviour
     ApplyTexture(_gifTextures[0]);
     StartPlayback();
 
+    isLoaded = true;
     OnGifLoaded?.Invoke();
   }
 
@@ -249,6 +287,11 @@ public class Display : MonoBehaviour
       GifCache.Remove(localPath);
     }
 
+    // 强制激活对象，以便协程启动
+    if (!gameObject.activeInHierarchy)
+      gameObject.SetActive(true);
+
+    isLoaded = false; // 重置加载状态
     StopAllCoroutines();
     StartCoroutine(LoadGif());
   }
