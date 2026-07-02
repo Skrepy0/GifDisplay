@@ -222,7 +222,7 @@ namespace GifDisplay
         // ---------- X ----------
         GUILayout.BeginHorizontal();
         GUILayout.Label(I18n.Tr("x_percent"), GUILayout.Width(150));
-        float newX = GUILayout.HorizontalSlider(settings.PosX, -100f, 100f, GUILayout.Width(850));
+        float newX = GUILayout.HorizontalSlider(settings.PosX, -100f, 100f, GUILayout.Width(950));
         if (newX != settings.PosX)
         {
           settings.PosX = newX;
@@ -236,7 +236,7 @@ namespace GifDisplay
         // ---------- Y ----------
         GUILayout.BeginHorizontal();
         GUILayout.Label(I18n.Tr("y_percent"), GUILayout.Width(150));
-        float newY = GUILayout.HorizontalSlider(settings.PosY, -100f, 100f, GUILayout.Width(850));
+        float newY = GUILayout.HorizontalSlider(settings.PosY, -100f, 100f, GUILayout.Width(950));
         if (newY != settings.PosY)
         {
           settings.PosY = newY;
@@ -250,7 +250,7 @@ namespace GifDisplay
         // ---------- Scale ----------
         GUILayout.BeginHorizontal();
         GUILayout.Label(I18n.Tr("scale"), GUILayout.Width(150));
-        float newScale = GUILayout.HorizontalSlider(settings.Scale, 0.1f, 3f, GUILayout.Width(850));
+        float newScale = GUILayout.HorizontalSlider(settings.Scale, 0.02f, 2.5f, GUILayout.Width(950));
         if (newScale != settings.Scale)
         {
           settings.Scale = newScale;
@@ -264,7 +264,7 @@ namespace GifDisplay
         // ---------- Opacity ----------
         GUILayout.BeginHorizontal();
         GUILayout.Label(I18n.Tr("opacity"), GUILayout.Width(150));
-        float newOpacity = GUILayout.HorizontalSlider(settings.Opacity, 0f, 1f, GUILayout.Width(850));
+        float newOpacity = GUILayout.HorizontalSlider(settings.Opacity, 0f, 1f, GUILayout.Width(950));
         if (newOpacity != settings.Opacity)
         {
           settings.Opacity = newOpacity;
