@@ -8,9 +8,8 @@
 
 ## 安装与使用
 
-### 前置依赖
+在 [Release](https://github.com/Skrepy0/GifDisplay)界面下载最新稳定版,并配合[UnityModManguager](https://github.com/newman55/unity-mod-manager)使用
 
-- [JALib](https://github.com/Jongye0l/JALib) 
 
 ## 致谢
 
