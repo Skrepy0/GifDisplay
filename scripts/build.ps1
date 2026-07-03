@@ -3,7 +3,6 @@ $SourceRoot = "D:\csp\GifDisplay"          # Root path of your mod project
 
 # Files to include in the zip (absolute paths or relative to $SourceRoot)
 $FilesToZip = @(
-    "$SourceRoot\packages\JALib\JALib.dll",
     "$SourceRoot\GifDisplay\bin\Release\GifDisplay.dll",
     "$SourceRoot\Info.json",
     "$SourceRoot\lang"           

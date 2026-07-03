@@ -79,9 +79,6 @@
         <Reference Include="I18N.West">
           <HintPath>D:\Program Files (x86)\Steam\steamapps\common\A Dance of Fire and Ice\A Dance of Fire and Ice_Data\Managed\I18N.West.dll</HintPath>
         </Reference>
-        <Reference Include="JALib">
-          <HintPath>D:\Program Files (x86)\Steam\steamapps\common\A Dance of Fire and Ice\Mods\JALib\JALib.dll</HintPath>
-        </Reference>
         <Reference Include="Mono.Data.Sqlite">
           <HintPath>D:\Program Files (x86)\Steam\steamapps\common\A Dance of Fire and Ice\A Dance of Fire and Ice_Data\Managed\Mono.Data.Sqlite.dll</HintPath>
         </Reference>
