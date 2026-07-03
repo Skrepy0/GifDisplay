@@ -308,8 +308,14 @@ namespace GifDisplay
 
     private void ApplyCache(CachedGif cached)
     {
-      _gifTextures = cached.Textures;
-      _gifDelays = cached.Delays;
+      _gifTextures = new Texture2D[cached.Textures.Length];
+      for (int i = 0; i < cached.Textures.Length; i++)
+      {
+        Texture2D original = cached.Textures[i];
+        _gifTextures[i] = Instantiate(original);
+      }
+
+      _gifDelays = (float[])cached.Delays.Clone();
 
       gifWidth = cached.Width;
       gifHeight = cached.Height;
