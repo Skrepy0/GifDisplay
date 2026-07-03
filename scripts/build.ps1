@@ -10,7 +10,7 @@ $FilesToZip = @(
 
 $OutputDir = "$SourceRoot\dist"                   # Where to save the resulting .zip
 # ------------------------------------------------------------
-
+Clear-Host
 # Read version from Info.json
 $infoJsonPath = "$SourceRoot\Info.json"
 if (-not (Test-Path $infoJsonPath)) {

@@ -17,6 +17,7 @@ $availableColors = @(
 $colorIndex = 0
 $modColorCache = @{ }
 
+Clear-Host
 function Get-ModColor($modName)
 {
     if (-not $modColorCache.ContainsKey($modName))
