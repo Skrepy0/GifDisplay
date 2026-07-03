@@ -1,6 +1,24 @@
 {
   "entries": [
     {
+      "key": "language",
+      "en": "Language:",
+      "zh": "语言:",
+      "ko": "언어:"
+    },
+    {
+      "key": "update_interval",
+      "en": "Update Interval",
+      "zh": "图片显示状态更新间隔(/帧)",
+      "ko": "업데이트 간격"
+    },
+    {
+      "key": "update_interval_desc",
+      "en": "Controls how often image visibility is updated. Lower values respond faster, higher values improve performance.",
+      "zh": "控制更新图片显示状态的频率。数值越低响应越快，数值越高性能越好",
+      "ko": "이미지 표시 상태 업데이트 빈도를 제어합니다. 값이 낮을수록 응답이 빠르고, 높을수록 성능이 향상됩니다."
+    },
+    {
       "key": "add_new_image",
       "en": "Add New Image",
       "zh": "添加新图片",

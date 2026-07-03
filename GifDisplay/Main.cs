@@ -21,6 +21,7 @@ namespace GifDisplay
     private static readonly List<ImageInstance> Instances = new();
     private static string settingsPath;
     private static string newImagePath = "";
+    private static GUIStyle boldLabelStyle;
 
     private static float cachedLogicalWidth;
     private static float cachedLogicalHeight;
@@ -34,6 +35,8 @@ namespace GifDisplay
     private static bool isReloading;
 
     private static List<bool> expandedStates = new(); // 每个实例的展开状态
+
+    private static int updateInterval = 5; // 每 5 帧更新一次
 
     // 控制器缓存与查找优化
     private static scrController cachedController;
@@ -97,7 +100,7 @@ namespace GifDisplay
       }
 
       stateUpdateCounter++;
-      if (stateUpdateCounter % 5 == 0)
+      if (stateUpdateCounter % updateInterval == 0)
       {
         UpdateGamePlayState();
         ApplyVisibilityRules();
@@ -127,12 +130,19 @@ namespace GifDisplay
     private static void OnGUI(UnityModManager.ModEntry entry)
     {
       if (!modEntry.Active) return;
+      if (boldLabelStyle == null)
+      {
+        boldLabelStyle = new GUIStyle(GUI.skin.label)
+        {
+          fontStyle = FontStyle.Bold,
+        };
+      }
 
       GUILayout.BeginVertical("box", GUILayout.Width(2000));
 
       // ================= 语言切换 =================
       GUILayout.BeginHorizontal();
-      GUILayout.Label("Language:", GUILayout.Width(150));
+      GUILayout.Label(I18n.Tr("language"), GUILayout.Width(150));
       string[] langs = { "en", "zh", "ko" };
       string[] langNames = { "English", "中文", "한국어" };
       int idx = Array.IndexOf(langs, I18n.Lang);
@@ -147,12 +157,44 @@ namespace GifDisplay
       GUILayout.FlexibleSpace();
       GUILayout.EndHorizontal();
 
+      // 游戏状态检测间隔
+      GUILayout.BeginHorizontal();
+      GUILayout.Label(I18n.Tr("update_interval"), boldLabelStyle, GUILayout.Width(600));
+      GUILayout.EndHorizontal();
+
+      GUILayout.BeginHorizontal();
+      int newUpdateInterval = Mathf.RoundToInt(GUILayout.HorizontalSlider(updateInterval, 1, 10, GUILayout.Width(500)));
+      if (newUpdateInterval != updateInterval)
+      {
+        updateInterval = newUpdateInterval;
+        SaveSettings();
+      }
+
+      GUILayout.Space(10);
+      GUILayout.Label(updateInterval.ToString(), GUILayout.Width(200));
+      GUILayout.FlexibleSpace();
+      GUILayout.EndHorizontal();
+
+      GUILayout.BeginHorizontal();
+      GUI.color = Color.green;
+      GUILayout.Label(I18n.Tr("update_interval_desc"), GUILayout.Width(1000));
+      GUI.color = Color.white;
+      GUILayout.EndHorizontal();
+
+      GUILayout.BeginHorizontal();
+      GUILayout.Label(" ");
+      GUILayout.FlexibleSpace();
+      GUILayout.EndHorizontal();
+
       // ================= 添加新图片 =================
-      GUILayout.Label(I18n.Tr("add_new_image"), GUILayout.Width(500));
+      GUILayout.BeginHorizontal();
+      GUILayout.Label(I18n.Tr("add_new_image"), boldLabelStyle, GUILayout.Width(700));
+      GUILayout.FlexibleSpace();
+      GUILayout.EndHorizontal();
       GUILayout.BeginHorizontal();
       GUILayout.Label(I18n.Tr("path"), GUILayout.Width(150));
       newImagePath = GUILayout.TextField(newImagePath, GUILayout.Width(600));
-
+      GUILayout.Space(20);
       if (GUILayout.Button(I18n.Tr("add"), GUILayout.Width(150)))
       {
         if (!string.IsNullOrEmpty(newImagePath))
@@ -220,14 +262,17 @@ namespace GifDisplay
         // 预览（始终显示）
         Texture tex = null;
         if (inst.Display != null)
-          tex = inst.Display.PreviewTexture;
+          tex = inst.Display.previewTexture;
         if (tex != null)
           GUILayout.Box(new GUIContent(tex), GUILayout.Width(80), GUILayout.Height(80));
         else
           GUILayout.Box(I18n.Tr("no_image"), GUILayout.Width(80), GUILayout.Height(80));
 
-        // 展开/折叠指示器
-
+        GUILayout.Space(25);
+        // 图片路径
+        GUI.color = Color.aquamarine;
+        GUILayout.Label(settings.PicGifPath, GUILayout.Width(1000));
+        GUI.color = Color.white;
         GUILayout.EndHorizontal();
 
         // ---------- 详细设置（根据展开状态显示） ----------
@@ -235,8 +280,14 @@ namespace GifDisplay
         {
           // 路径 + 重载
           GUILayout.BeginHorizontal();
-          GUILayout.Label(I18n.Tr("path"), GUILayout.Width(100));
-          GUILayout.Label(settings.PicGifPath, GUILayout.Width(750));
+          string imagePath = GUILayout.TextField(settings.PicGifPath, GUILayout.Width(600));
+          if (imagePath != settings.PicGifPath)
+          {
+            settings.PicGifPath = imagePath;
+            SaveSettings();
+          }
+
+          GUILayout.Space(10);
           if (GUILayout.Button(I18n.Tr("reload"), GUILayout.Width(200)))
           {
             inst.Display.localPath = settings.PicGifPath;
@@ -249,7 +300,7 @@ namespace GifDisplay
           // X
           GUILayout.BeginHorizontal();
           GUILayout.Label(I18n.Tr("x_percent"), GUILayout.Width(150));
-          float newX = GUILayout.HorizontalSlider(settings.PosX, -100f, 100f, GUILayout.Width(950));
+          float newX = GUILayout.HorizontalSlider(settings.PosX, -100f, 100f, GUILayout.Width(1050));
           if (newX != settings.PosX)
           {
             settings.PosX = newX;
@@ -263,7 +314,7 @@ namespace GifDisplay
           // Y
           GUILayout.BeginHorizontal();
           GUILayout.Label(I18n.Tr("y_percent"), GUILayout.Width(150));
-          float newY = GUILayout.HorizontalSlider(settings.PosY, -100f, 100f, GUILayout.Width(950));
+          float newY = GUILayout.HorizontalSlider(settings.PosY, -100f, 100f, GUILayout.Width(1050));
           if (newY != settings.PosY)
           {
             settings.PosY = newY;
@@ -277,7 +328,7 @@ namespace GifDisplay
           // Scale
           GUILayout.BeginHorizontal();
           GUILayout.Label(I18n.Tr("scale"), GUILayout.Width(150));
-          float newScale = GUILayout.HorizontalSlider(settings.Scale, 0.02f, 2.5f, GUILayout.Width(950));
+          float newScale = GUILayout.HorizontalSlider(settings.Scale, 0.02f, 2.5f, GUILayout.Width(1050));
           if (newScale != settings.Scale)
           {
             settings.Scale = newScale;
@@ -291,7 +342,7 @@ namespace GifDisplay
           // Opacity
           GUILayout.BeginHorizontal();
           GUILayout.Label(I18n.Tr("opacity"), GUILayout.Width(150));
-          float newOpacity = GUILayout.HorizontalSlider(settings.Opacity, 0f, 1f, GUILayout.Width(950));
+          float newOpacity = GUILayout.HorizontalSlider(settings.Opacity, 0f, 1f, GUILayout.Width(1050));
           if (newOpacity != settings.Opacity)
           {
             settings.Opacity = newOpacity;
@@ -668,6 +719,7 @@ namespace GifDisplay
 
       JObject root = new JObject();
       root["language"] = I18n.Lang;
+      root["updateInterval"] = updateInterval;
 
       JArray instancesArray = new JArray();
       foreach (var inst in Instances)
@@ -690,6 +742,12 @@ namespace GifDisplay
           string lang = langToken.Value<string>();
           if (!string.IsNullOrEmpty(lang))
             I18n.Lang = lang;
+        }
+
+        if (root.TryGetValue("updateInterval", out JToken updateIntervalToken))
+        {
+          int val = updateIntervalToken.Value<int>();
+          updateInterval = val;
         }
 
         if (root.TryGetValue("instances", out JToken instancesToken))
