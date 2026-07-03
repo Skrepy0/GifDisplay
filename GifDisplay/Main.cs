@@ -4,6 +4,7 @@ using UnityEngine;
 using UnityEngine.UI;
 using System.IO;
 using System.Collections.Generic;
+using System.Linq;
 using Newtonsoft.Json;
 using System.Reflection;
 using Newtonsoft.Json.Linq;
@@ -37,6 +38,9 @@ namespace GifDisplay
     private static List<bool> expandedStates = new(); // 每个实例的展开状态
 
     private static int updateInterval = 5; // 每 5 帧更新一次
+
+    private static int pathErrorCode = -1;
+    private static readonly string[] ValidFormat = new[] { "png", "jpg", "jpeg", "gif" };
 
     // 控制器缓存与查找优化
     private static scrController cachedController;
@@ -126,6 +130,17 @@ namespace GifDisplay
         expandedStates.RemoveAt(expandedStates.Count - 1);
     }
 
+    private static void PurifyString(ref string str)
+    {
+      if (!string.IsNullOrEmpty(str))
+      {
+        if (str.StartsWith('"'))
+          str = str.Substring(1);
+        if (str.EndsWith('"'))
+          str = str.Substring(0, newImagePath.Length - 1);
+      }
+    }
+
     // ---------- GUI ----------
     private static void OnGUI(UnityModManager.ModEntry entry)
     {
@@ -197,44 +212,59 @@ namespace GifDisplay
       GUILayout.Space(20);
       if (GUILayout.Button(I18n.Tr("add"), GUILayout.Width(150)))
       {
-        if (!string.IsNullOrEmpty(newImagePath))
+        PurifyString(ref newImagePath);
+        var stringList = newImagePath.Split('.');
+        string format = stringList[stringList.Length - 1];
+        if (!ValidFormat.Contains(format))
         {
-          if (newImagePath.StartsWith('"'))
-            newImagePath = newImagePath.Substring(1);
-          if (newImagePath.EndsWith('"'))
-            newImagePath = newImagePath.Substring(0, newImagePath.Length - 1);
-        }
-
-        if (!string.IsNullOrEmpty(newImagePath) && File.Exists(newImagePath))
-        {
-          var data = new SettingsData
-          {
-            PicGifPath = newImagePath,
-            PosX = 0f,
-            PosY = 0f,
-            Scale = 1f,
-            Opacity = 1f,
-            SortingOrder = 9,
-            ShowDuringPlay = true,
-            ShowDuringNotPlay = true
-          };
-          if (Instances.Count > 0)
-          {
-            data.PosX = Mathf.Clamp(Instances[Instances.Count - 1].Settings.PosX + 10, -100, 100);
-            data.PosY = Mathf.Clamp(Instances[Instances.Count - 1].Settings.PosY + 10, -100, 100);
-          }
-
-          CreateInstance(data);
-          SaveSettings();
-          newImagePath = "";
+          pathErrorCode = format.IsNullOrEmpty() || format == newImagePath ? 0 : 1; // 0:无效输入, 没有显式指定的图片格式,1:不支持的格式
         }
         else
         {
-          modEntry.Logger.Log(I18n.Tr("invalid_path") + newImagePath);
+          if (!string.IsNullOrEmpty(newImagePath) && File.Exists(newImagePath))
+          {
+            var data = new SettingsData
+            {
+              PicGifPath = newImagePath,
+              PosX = 0f,
+              PosY = 0f,
+              Scale = 1f,
+              Opacity = 1f,
+              SortingOrder = 9,
+              ShowDuringPlay = true,
+              ShowDuringNotPlay = true
+            };
+            if (Instances.Count > 0)
+            {
+              data.PosX = Mathf.Clamp(Instances[Instances.Count - 1].Settings.PosX + 10, -100, 100);
+              data.PosY = Mathf.Clamp(Instances[Instances.Count - 1].Settings.PosY + 10, -100, 100);
+            }
+
+            CreateInstance(data);
+            SaveSettings();
+            newImagePath = "";
+            pathErrorCode = -1;
+          }
+          else
+          {
+            pathErrorCode = 2; // 无效路径
+            modEntry.Logger.Log(I18n.Tr("invalid_path") + newImagePath);
+          }
         }
       }
 
       GUILayout.EndHorizontal();
+      if (pathErrorCode != -1)
+      {
+        string meg = I18n.Tr($"path_error_{pathErrorCode}");
+
+        GUILayout.BeginHorizontal();
+        GUI.color = Color.coral;
+        GUILayout.Label(meg, GUILayout.Width(1000));
+        GUI.color = Color.white;
+        GUILayout.EndHorizontal();
+      }
+
 
       // ---- 图片列表 ----
       for (int i = 0; i < Instances.Count; i++)
@@ -281,6 +311,7 @@ namespace GifDisplay
           // 路径 + 重载
           GUILayout.BeginHorizontal();
           string imagePath = GUILayout.TextField(settings.PicGifPath, GUILayout.Width(600));
+          PurifyString(ref imagePath);
           if (imagePath != settings.PicGifPath)
           {
             settings.PicGifPath = imagePath;
@@ -328,7 +359,7 @@ namespace GifDisplay
           // Scale
           GUILayout.BeginHorizontal();
           GUILayout.Label(I18n.Tr("scale"), GUILayout.Width(150));
-          float newScale = GUILayout.HorizontalSlider(settings.Scale, 0.02f, 2.5f, GUILayout.Width(1050));
+          float newScale = GUILayout.HorizontalSlider(settings.Scale, 0.01f, 2.5f, GUILayout.Width(1050));
           if (newScale != settings.Scale)
           {
             settings.Scale = newScale;

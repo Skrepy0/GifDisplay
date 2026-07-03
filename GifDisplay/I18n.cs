@@ -32,6 +32,9 @@ namespace GifDisplay
       ["confirm"] = "Confirm?",
       ["image"] = "Image",
       ["reloading"] = "Reloading...",
+      ["path_error_0"] = "Invalid input, no image format explicitly specified.",
+      ["path_error_1"] = "Unsupported image format.",
+      ["path_error_2"] = "Invalid path, please check if the file exists.",
     };
 
     private static readonly Dictionary<string, string> zh = new()
@@ -58,6 +61,9 @@ namespace GifDisplay
       ["confirm"] = "确认删除?",
       ["image"] = "图片",
       ["reloading"] = "重新加载中...",
+      ["path_error_0"]="无效输入, 没有显式指定的图片格式",
+      ["path_error_1"]="不支持的图片格式",
+      ["path_error_2"]="无效路径,请检查文件是否存在",
     };
 
     private static readonly Dictionary<string, string> ko = new()
@@ -84,6 +90,9 @@ namespace GifDisplay
       ["confirm"] = "삭제 확인?",
       ["image"] = "이미지",
       ["reloading"] = "다시 로드 중...",
+      ["path_error_0"] = "잘못된 입력입니다. 명시적으로 지정된 이미지 형식이 없습니다.",
+      ["path_error_1"] = "지원하지 않는 이미지 형식입니다.",
+      ["path_error_2"] = "잘못된 경로입니다. 파일이 존재하는지 확인하세요.",
     };
 
     private static string _lang = "en";

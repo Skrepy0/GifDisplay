@@ -1,6 +1,24 @@
 {
   "entries": [
     {
+      "key": "path_error_0",
+      "en": "Invalid input, no image format explicitly specified.",
+      "zh": "无效输入, 没有显式指定的图片格式",
+      "ko": "잘못된 입력입니다. 명시적으로 지정된 이미지 형식이 없습니다."
+    },
+    {
+      "key": "path_error_1",
+      "en": "Unsupported image format.",
+      "zh": "不支持的图片格式",
+      "ko": "지원하지 않는 이미지 형식입니다."
+    },
+    {
+      "key": "path_error_2",
+      "en": "Invalid path, please check if the file exists.",
+      "zh": "无效路径,请检查文件是否存在",
+      "ko": "잘못된 경로입니다. 파일이 존재하는지 확인하세요."
+    },
+    {
       "key": "language",
       "en": "Language:",
       "zh": "语言:",
