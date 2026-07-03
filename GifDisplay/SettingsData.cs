@@ -8,5 +8,6 @@ public class SettingsData
   public float Opacity = 1.0f;
   public string PicGifPath = "";
   public int SortingOrder = 9;
-  public bool ShowOnlyDuringPlay = false;
+  public bool ShowDuringPlay = true;
+  public bool ShowDuringNotPlay = true;
 }

@@ -33,7 +33,7 @@ namespace GifDisplay
     private static bool loading;
     private static bool isReloading;
 
-    private static List<bool> _expandedStates = new List<bool>(); // 每个实例的展开状态
+    private static List<bool> expandedStates = new(); // 每个实例的展开状态
 
     // 控制器缓存与查找优化
     private static scrController cachedController;
@@ -117,10 +117,10 @@ namespace GifDisplay
 
     private static void SyncExpandedStates()
     {
-      while (_expandedStates.Count < Instances.Count)
-        _expandedStates.Add(false);
-      while (_expandedStates.Count > Instances.Count)
-        _expandedStates.RemoveAt(_expandedStates.Count - 1);
+      while (expandedStates.Count < Instances.Count)
+        expandedStates.Add(false);
+      while (expandedStates.Count > Instances.Count)
+        expandedStates.RemoveAt(expandedStates.Count - 1);
     }
 
     // ---------- GUI ----------
@@ -173,7 +173,8 @@ namespace GifDisplay
             Scale = 1f,
             Opacity = 1f,
             SortingOrder = 9,
-            ShowOnlyDuringPlay = false
+            ShowDuringPlay = true,
+            ShowDuringNotPlay = true
           };
           if (Instances.Count > 0)
           {
@@ -201,18 +202,21 @@ namespace GifDisplay
         bool changed = false;
 
         // 确保展开状态列表足够
-        if (_expandedStates.Count <= i)
-          _expandedStates.Add(false);
+        if (expandedStates.Count <= i)
+          expandedStates.Add(false);
 
         GUILayout.BeginVertical("box");
         GUILayout.BeginHorizontal();
 
         // 编号（点击可切换折叠）
-        if (GUILayout.Button($"{I18n.Tr("image")} #{i + 1}", GUILayout.Width(150)))
+        if (GUILayout.Button($"#{i + 1}", GUILayout.Width(100)))
         {
-          _expandedStates[i] = !_expandedStates[i];
+          expandedStates[i] = !expandedStates[i];
         }
 
+        GUILayout.Space(25);
+        GUILayout.Label(expandedStates[i] ? "▼" : "▶", GUILayout.Width(50));
+        GUILayout.Space(25);
         // 预览（始终显示）
         Texture tex = null;
         if (inst.Display != null)
@@ -223,13 +227,11 @@ namespace GifDisplay
           GUILayout.Box(I18n.Tr("no_image"), GUILayout.Width(80), GUILayout.Height(80));
 
         // 展开/折叠指示器
-        GUILayout.FlexibleSpace();
-        GUILayout.Label(_expandedStates[i] ? "▼" : "▶", GUILayout.Width(30));
 
         GUILayout.EndHorizontal();
 
         // ---------- 详细设置（根据展开状态显示） ----------
-        if (_expandedStates[i])
+        if (expandedStates[i])
         {
           // 路径 + 重载
           GUILayout.BeginHorizontal();
@@ -322,13 +324,26 @@ namespace GifDisplay
           GUILayout.Label(I18n.Tr("higher_in_front"), GUILayout.Width(550));
           GUILayout.EndHorizontal();
 
-          // Show only during play
+          // Show during play
           GUILayout.BeginHorizontal();
-          GUILayout.Label(I18n.Tr("show_only_during_play"), GUILayout.Width(250));
-          bool newShowOnly = GUILayout.Toggle(settings.ShowOnlyDuringPlay, "");
-          if (newShowOnly != settings.ShowOnlyDuringPlay)
+          GUILayout.Label(I18n.Tr("show_during_play"), GUILayout.Width(280));
+          bool newShowDuringPlay = GUILayout.Toggle(settings.ShowDuringPlay, "");
+          if (newShowDuringPlay != settings.ShowDuringPlay)
           {
-            settings.ShowOnlyDuringPlay = newShowOnly;
+            settings.ShowDuringPlay = newShowDuringPlay;
+            changed = true;
+          }
+
+          GUILayout.FlexibleSpace();
+          GUILayout.EndHorizontal();
+
+          // Show during not play
+          GUILayout.BeginHorizontal();
+          GUILayout.Label(I18n.Tr("show_during_not_play"), GUILayout.Width(280));
+          bool newShowDuringNotPlaying = GUILayout.Toggle(settings.ShowDuringNotPlay, "");
+          if (newShowDuringNotPlaying != settings.ShowDuringNotPlay)
+          {
+            settings.ShowDuringNotPlay = newShowDuringNotPlaying;
             changed = true;
           }
 
@@ -349,7 +364,7 @@ namespace GifDisplay
               if (inst.GameObject != null)
                 Object.Destroy(inst.GameObject);
               Instances.RemoveAt(i);
-              _expandedStates.RemoveAt(i); // 同步移除状态
+              expandedStates.RemoveAt(i); // 同步移除状态
               SaveSettings();
               GUILayout.EndVertical();
               break;
@@ -517,7 +532,7 @@ namespace GifDisplay
         UpdateInstanceTransform(inst);
     }
 
-    // ---------- 游戏状态检测（优化版） ----------
+    // ---------- 游戏状态检测 ----------
     private static void UpdateGamePlayState()
     {
       // 如果已确定找不到控制器，每隔 30 帧重试一次
@@ -529,12 +544,11 @@ namespace GifDisplay
         findControllerFrameCounter = 0;
       }
 
-      bool newState = false;
       try
       {
+        // 获取控制器引用（首次或重试时）
         if (cachedController == null)
         {
-          // 尝试获取 scrController
           GameObject controllerGo = GameObject.Find("scrController");
           if (controllerGo == null)
           {
@@ -559,21 +573,27 @@ namespace GifDisplay
           }
         }
 
-        // 反射字段查找（仅一次）
         if (gameplayField == null && !reflectionFailed)
         {
-          var fields =
-            typeof(scrController).GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-          foreach (var f in fields)
+          gameplayField = typeof(scrController).GetField("gameworld",
+            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+
+          // 兜底
+          if (gameplayField == null)
           {
-            if (f.FieldType == typeof(bool) &&
-                (f.Name.ToLower().Contains("play") ||
-                 f.Name.ToLower().Contains("active") ||
-                 f.Name.ToLower().Contains("game")))
+            var fields = typeof(scrController).GetFields(
+              BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            foreach (var f in fields)
             {
-              gameplayField = f;
-              modEntry.Logger.Log($"Found gameplay field: '{f.Name}'");
-              break;
+              if (f.FieldType == typeof(bool) &&
+                  (f.Name.ToLower().Contains("play") ||
+                   f.Name.ToLower().Contains("active") ||
+                   f.Name.ToLower().Contains("game")))
+              {
+                gameplayField = f;
+                modEntry.Logger.Log($"Found gameplay field: '{f.Name}'");
+                break;
+              }
             }
           }
 
@@ -585,28 +605,25 @@ namespace GifDisplay
           }
         }
 
-        if (gameplayField != null)
-          newState = (bool)gameplayField.GetValue(cachedController);
-        else
-          newState = true; // 反射失败时默认播放
+        // 读取游戏状态
+        bool newState = gameplayField != null ? (bool)gameplayField.GetValue(cachedController) : true;
+
+        if (newState != isGamePlaying)
+        {
+          isGamePlaying = newState;
+          modEntry.Logger.Log($"Game playing state changed to: {isGamePlaying}");
+        }
       }
       catch (Exception ex)
       {
         modEntry.Logger.Log($"Error detecting game state: {ex.Message}");
-        newState = false;
         // 出错时重置缓存，下次重新查找
         cachedController = null;
         controllerNotFound = false;
       }
-
-      if (newState != isGamePlaying)
-      {
-        isGamePlaying = newState;
-        modEntry.Logger.Log($"Game playing state changed to: {isGamePlaying}");
-      }
     }
 
-    // ---------- 应用可见性规则（优化版） ----------
+    // ---------- 应用可见性规则 ----------
     private static void ApplyVisibilityRules()
     {
       if (loading || ReferenceEquals(canvasObject, null))
@@ -621,9 +638,11 @@ namespace GifDisplay
           continue;
 
         bool shouldShow = true;
-        if (inst.Display.isLoaded && inst.Settings.ShowOnlyDuringPlay)
+        if (inst.Display.isLoaded)
         {
-          shouldShow = isGamePlaying;
+          shouldShow = (inst.Settings.ShowDuringPlay && inst.Settings.ShowDuringNotPlay) ||
+                       (inst.Settings.ShowDuringPlay && isGamePlaying) ||
+                       (inst.Settings.ShowDuringNotPlay && !isGamePlaying);
         }
 
         if (inst.GameObject.activeSelf != shouldShow)
@@ -685,7 +704,6 @@ namespace GifDisplay
       }
       catch (Exception ex)
       {
-        // 兼容旧格式
         try
         {
           string json = File.ReadAllText(settingsPath);
