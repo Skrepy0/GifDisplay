@@ -4,6 +4,7 @@ using UnityEngine.UI;
 using UnityEngine.Networking;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 
 namespace GifDisplay
 {
@@ -124,8 +125,8 @@ namespace GifDisplay
       }
 
       string ext = Path.GetExtension(localPath).ToLowerInvariant();
-
-      if (ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".webp")
+      var strList = ext.Split('.');
+      if (strList.Length == 2 && Main.ValidFormat.Contains(strList[1]) && ext != ".gif")
       {
         yield return LoadStatic(fileData, ext, cacheKey);
       }
@@ -146,28 +147,11 @@ namespace GifDisplay
     private IEnumerator LoadStatic(byte[] fileData, string ext, string cacheKey)
     {
       Texture2D tex;
-
-      if (ext == ".webp")
+      tex = new Texture2D(2, 2);
+      if (!tex.LoadImage(fileData))
       {
-        using var req = UnityWebRequestTexture.GetTexture("file://" + localPath);
-        yield return req.SendWebRequest();
-
-        if (req.result != UnityWebRequest.Result.Success)
-        {
-          LogErrorCallback?.Invoke(req.error);
-          yield break;
-        }
-
-        tex = DownloadHandlerTexture.GetContent(req);
-      }
-      else
-      {
-        tex = new Texture2D(2, 2);
-        if (!tex.LoadImage(fileData))
-        {
-          Destroy(tex);
-          yield break;
-        }
+        Destroy(tex);
+        yield break;
       }
 
       _gifTextures = new[] { tex };

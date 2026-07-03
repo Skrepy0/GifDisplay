@@ -40,7 +40,7 @@ namespace GifDisplay
     private static int updateInterval = 5; // 每 5 帧更新一次
 
     private static int pathErrorCode = -1;
-    private static readonly string[] ValidFormat = new[] { "png", "jpg", "jpeg", "gif" };
+    public static readonly string[] ValidFormat = new[] { "png", "jpg", "jpeg", "gif" };
 
     // 控制器缓存与查找优化
     private static scrController cachedController;
