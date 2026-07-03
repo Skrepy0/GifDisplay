@@ -33,6 +33,8 @@ namespace GifDisplay
     private static bool loading;
     private static bool isReloading;
 
+    private static List<bool> _expandedStates = new List<bool>(); // 每个实例的展开状态
+
     // 控制器缓存与查找优化
     private static scrController cachedController;
     private static int findControllerFrameCounter;
@@ -113,6 +115,14 @@ namespace GifDisplay
       return true;
     }
 
+    private static void SyncExpandedStates()
+    {
+      while (_expandedStates.Count < Instances.Count)
+        _expandedStates.Add(false);
+      while (_expandedStates.Count > Instances.Count)
+        _expandedStates.RemoveAt(_expandedStates.Count - 1);
+    }
+
     // ---------- GUI ----------
     private static void OnGUI(UnityModManager.ModEntry entry)
     {
@@ -163,7 +173,7 @@ namespace GifDisplay
             Scale = 1f,
             Opacity = 1f,
             SortingOrder = 9,
-            ShowOnlyDuringPlay = true
+            ShowOnlyDuringPlay = false
           };
           if (Instances.Count > 0)
           {
@@ -183,160 +193,177 @@ namespace GifDisplay
 
       GUILayout.EndHorizontal();
 
-      // ================= 图片列表 =================
+      // ---- 图片列表 ----
       for (int i = 0; i < Instances.Count; i++)
       {
         var inst = Instances[i];
         var settings = inst.Settings;
         bool changed = false;
 
-        GUILayout.BeginVertical("box");
-        GUILayout.Label($"{I18n.Tr("image")} #{i + 1}");
+        // 确保展开状态列表足够
+        if (_expandedStates.Count <= i)
+          _expandedStates.Add(false);
 
-        // ---------- 路径 + 重载 ----------
+        GUILayout.BeginVertical("box");
         GUILayout.BeginHorizontal();
-        GUILayout.Label(I18n.Tr("path"), GUILayout.Width(100));
-        GUILayout.Label(settings.PicGifPath, GUILayout.Width(750));
-        if (GUILayout.Button(I18n.Tr("reload"), GUILayout.Width(200)))
+
+        // 编号（点击可切换折叠）
+        if (GUILayout.Button($"{I18n.Tr("image")} #{i + 1}", GUILayout.Width(150)))
         {
-          inst.Display.localPath = settings.PicGifPath;
-          inst.Display.Reload(true);
-          inst.ConfirmDelete = false;
+          _expandedStates[i] = !_expandedStates[i];
         }
 
-        GUILayout.EndHorizontal();
-
-        // ---------- 预览 ----------
-        GUILayout.BeginHorizontal();
-        GUILayout.Label(I18n.Tr("preview"), GUILayout.Width(120));
+        // 预览（始终显示）
         Texture tex = null;
         if (inst.Display != null)
           tex = inst.Display.PreviewTexture;
         if (tex != null)
-          GUILayout.Box(new GUIContent(tex), GUILayout.Width(100), GUILayout.Height(100));
+          GUILayout.Box(new GUIContent(tex), GUILayout.Width(80), GUILayout.Height(80));
         else
-          GUILayout.Box(I18n.Tr("no_image"), GUILayout.Width(100), GUILayout.Height(100));
+          GUILayout.Box(I18n.Tr("no_image"), GUILayout.Width(80), GUILayout.Height(80));
+
+        // 展开/折叠指示器
         GUILayout.FlexibleSpace();
+        GUILayout.Label(_expandedStates[i] ? "▼" : "▶", GUILayout.Width(30));
+
         GUILayout.EndHorizontal();
 
-        // ---------- X ----------
-        GUILayout.BeginHorizontal();
-        GUILayout.Label(I18n.Tr("x_percent"), GUILayout.Width(150));
-        float newX = GUILayout.HorizontalSlider(settings.PosX, -100f, 100f, GUILayout.Width(950));
-        if (newX != settings.PosX)
+        // ---------- 详细设置（根据展开状态显示） ----------
+        if (_expandedStates[i])
         {
-          settings.PosX = newX;
-          inst.PosXStr = newX.ToString("F1") + "%";
-          changed = true;
-        }
-
-        GUILayout.Label(inst.PosXStr, GUILayout.Width(120));
-        GUILayout.EndHorizontal();
-
-        // ---------- Y ----------
-        GUILayout.BeginHorizontal();
-        GUILayout.Label(I18n.Tr("y_percent"), GUILayout.Width(150));
-        float newY = GUILayout.HorizontalSlider(settings.PosY, -100f, 100f, GUILayout.Width(950));
-        if (newY != settings.PosY)
-        {
-          settings.PosY = newY;
-          inst.PosYStr = newY.ToString("F1") + "%";
-          changed = true;
-        }
-
-        GUILayout.Label(inst.PosYStr, GUILayout.Width(120));
-        GUILayout.EndHorizontal();
-
-        // ---------- Scale ----------
-        GUILayout.BeginHorizontal();
-        GUILayout.Label(I18n.Tr("scale"), GUILayout.Width(150));
-        float newScale = GUILayout.HorizontalSlider(settings.Scale, 0.02f, 2.5f, GUILayout.Width(950));
-        if (newScale != settings.Scale)
-        {
-          settings.Scale = newScale;
-          inst.ScaleStr = newScale.ToString("F2");
-          changed = true;
-        }
-
-        GUILayout.Label(inst.ScaleStr, GUILayout.Width(80));
-        GUILayout.EndHorizontal();
-
-        // ---------- Opacity ----------
-        GUILayout.BeginHorizontal();
-        GUILayout.Label(I18n.Tr("opacity"), GUILayout.Width(150));
-        float newOpacity = GUILayout.HorizontalSlider(settings.Opacity, 0f, 1f, GUILayout.Width(950));
-        if (newOpacity != settings.Opacity)
-        {
-          settings.Opacity = newOpacity;
-          inst.OpacityStr = newOpacity.ToString("F2");
-          changed = true;
-        }
-
-        GUILayout.Label(inst.OpacityStr, GUILayout.Width(100));
-        GUILayout.EndHorizontal();
-
-        // ---------- Sorting Order ----------
-        GUILayout.BeginHorizontal();
-        GUILayout.Label(I18n.Tr("sorting_order"), GUILayout.Width(250));
-        string newSortStr = GUILayout.TextField(inst.SortingOrderStr, GUILayout.Width(100));
-        if (newSortStr != inst.SortingOrderStr)
-        {
-          if (int.TryParse(newSortStr, out int newSort))
+          // 路径 + 重载
+          GUILayout.BeginHorizontal();
+          GUILayout.Label(I18n.Tr("path"), GUILayout.Width(100));
+          GUILayout.Label(settings.PicGifPath, GUILayout.Width(750));
+          if (GUILayout.Button(I18n.Tr("reload"), GUILayout.Width(200)))
           {
-            settings.SortingOrder = newSort;
-            inst.SortingOrderStr = newSortStr;
-            UpdateInstanceSorting(inst);
+            inst.Display.localPath = settings.PicGifPath;
+            inst.Display.Reload(true);
+            inst.ConfirmDelete = false;
+          }
+
+          GUILayout.EndHorizontal();
+
+          // X
+          GUILayout.BeginHorizontal();
+          GUILayout.Label(I18n.Tr("x_percent"), GUILayout.Width(150));
+          float newX = GUILayout.HorizontalSlider(settings.PosX, -100f, 100f, GUILayout.Width(950));
+          if (newX != settings.PosX)
+          {
+            settings.PosX = newX;
+            inst.PosXStr = newX.ToString("F1") + "%";
             changed = true;
           }
-          else
+
+          GUILayout.Label(inst.PosXStr, GUILayout.Width(120));
+          GUILayout.EndHorizontal();
+
+          // Y
+          GUILayout.BeginHorizontal();
+          GUILayout.Label(I18n.Tr("y_percent"), GUILayout.Width(150));
+          float newY = GUILayout.HorizontalSlider(settings.PosY, -100f, 100f, GUILayout.Width(950));
+          if (newY != settings.PosY)
           {
-            inst.SortingOrderStr = settings.SortingOrder.ToString();
-          }
-        }
-
-        GUILayout.Label(I18n.Tr("higher_in_front"), GUILayout.Width(550));
-        GUILayout.EndHorizontal();
-
-        // ---------- Show only during play ----------
-        GUILayout.BeginHorizontal();
-        GUILayout.Label(I18n.Tr("show_only_during_play"), GUILayout.Width(250));
-        bool newShowOnly = GUILayout.Toggle(settings.ShowOnlyDuringPlay, "");
-        if (newShowOnly != settings.ShowOnlyDuringPlay)
-        {
-          settings.ShowOnlyDuringPlay = newShowOnly;
-          changed = true;
-        }
-
-        GUILayout.FlexibleSpace();
-        GUILayout.EndHorizontal();
-
-        // ---------- 删除按钮 ----------
-        if (changed)
-          inst.ConfirmDelete = false;
-
-        Color oldColor = GUI.backgroundColor;
-        GUI.backgroundColor = Color.red;
-
-        string deleteText = inst.ConfirmDelete ? I18n.Tr("confirm") : I18n.Tr("delete");
-        if (GUILayout.Button(deleteText, GUILayout.Width(200)))
-        {
-          if (inst.ConfirmDelete)
-          {
-            if (inst.GameObject != null)
-              Object.Destroy(inst.GameObject);
-            Instances.RemoveAt(i);
-            SaveSettings();
-            GUILayout.EndVertical();
-            break;
+            settings.PosY = newY;
+            inst.PosYStr = newY.ToString("F1") + "%";
+            changed = true;
           }
 
-          inst.ConfirmDelete = true;
-        }
+          GUILayout.Label(inst.PosYStr, GUILayout.Width(120));
+          GUILayout.EndHorizontal();
 
-        GUI.backgroundColor = oldColor;
+          // Scale
+          GUILayout.BeginHorizontal();
+          GUILayout.Label(I18n.Tr("scale"), GUILayout.Width(150));
+          float newScale = GUILayout.HorizontalSlider(settings.Scale, 0.02f, 2.5f, GUILayout.Width(950));
+          if (newScale != settings.Scale)
+          {
+            settings.Scale = newScale;
+            inst.ScaleStr = newScale.ToString("F2");
+            changed = true;
+          }
+
+          GUILayout.Label(inst.ScaleStr, GUILayout.Width(80));
+          GUILayout.EndHorizontal();
+
+          // Opacity
+          GUILayout.BeginHorizontal();
+          GUILayout.Label(I18n.Tr("opacity"), GUILayout.Width(150));
+          float newOpacity = GUILayout.HorizontalSlider(settings.Opacity, 0f, 1f, GUILayout.Width(950));
+          if (newOpacity != settings.Opacity)
+          {
+            settings.Opacity = newOpacity;
+            inst.OpacityStr = newOpacity.ToString("F2");
+            changed = true;
+          }
+
+          GUILayout.Label(inst.OpacityStr, GUILayout.Width(100));
+          GUILayout.EndHorizontal();
+
+          // Sorting Order
+          GUILayout.BeginHorizontal();
+          GUILayout.Label(I18n.Tr("sorting_order"), GUILayout.Width(250));
+          string newSortStr = GUILayout.TextField(inst.SortingOrderStr, GUILayout.Width(100));
+          if (newSortStr != inst.SortingOrderStr)
+          {
+            if (int.TryParse(newSortStr, out int newSort))
+            {
+              settings.SortingOrder = newSort;
+              inst.SortingOrderStr = newSortStr;
+              UpdateInstanceSorting(inst);
+              changed = true;
+            }
+            else
+            {
+              inst.SortingOrderStr = settings.SortingOrder.ToString();
+            }
+          }
+
+          GUILayout.Label(I18n.Tr("higher_in_front"), GUILayout.Width(550));
+          GUILayout.EndHorizontal();
+
+          // Show only during play
+          GUILayout.BeginHorizontal();
+          GUILayout.Label(I18n.Tr("show_only_during_play"), GUILayout.Width(250));
+          bool newShowOnly = GUILayout.Toggle(settings.ShowOnlyDuringPlay, "");
+          if (newShowOnly != settings.ShowOnlyDuringPlay)
+          {
+            settings.ShowOnlyDuringPlay = newShowOnly;
+            changed = true;
+          }
+
+          GUILayout.FlexibleSpace();
+          GUILayout.EndHorizontal();
+
+          // 删除按钮
+          if (changed)
+            inst.ConfirmDelete = false;
+
+          Color oldColor = GUI.backgroundColor;
+          GUI.backgroundColor = Color.red;
+          string deleteText = inst.ConfirmDelete ? I18n.Tr("confirm") : I18n.Tr("delete");
+          if (GUILayout.Button(deleteText, GUILayout.Width(200)))
+          {
+            if (inst.ConfirmDelete)
+            {
+              if (inst.GameObject != null)
+                Object.Destroy(inst.GameObject);
+              Instances.RemoveAt(i);
+              _expandedStates.RemoveAt(i); // 同步移除状态
+              SaveSettings();
+              GUILayout.EndVertical();
+              break;
+            }
+
+            inst.ConfirmDelete = true;
+          }
+
+          GUI.backgroundColor = oldColor;
+        } // 结束 if (expanded)
 
         GUILayout.EndVertical();
 
+        // 处理更改保存
         if (changed)
         {
           UpdateInstanceTransform(inst);
@@ -674,6 +701,8 @@ namespace GifDisplay
           modEntry.Logger.Log($"LoadSettings error: {ex.Message}");
         }
       }
+
+      SyncExpandedStates();
     }
 
     public static void ClearAll()
