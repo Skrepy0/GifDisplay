@@ -230,6 +230,7 @@ namespace GifDisplay
               PosY = 0f,
               Scale = 1f,
               Opacity = 1f,
+              Rotation = 0.0f,
               SortingOrder = 9,
               ShowDuringPlay = true,
               ShowDuringNotPlay = true
@@ -354,6 +355,20 @@ namespace GifDisplay
           }
 
           GUILayout.Label(inst.PosYStr, GUILayout.Width(120));
+          GUILayout.EndHorizontal();
+
+          // Rotation
+          GUILayout.BeginHorizontal();
+          GUILayout.Label(I18n.Tr("rotation"), GUILayout.Width(150));
+          float newRotation = GUILayout.HorizontalSlider(settings.Rotation, -360.0f, 360.0f, GUILayout.Width(1050));
+          if (newRotation != settings.Rotation)
+          {
+            settings.Rotation = newRotation;
+            inst.RotationStr = newRotation.ToString("F1") + "°";
+            changed = true;
+          }
+
+          GUILayout.Label(inst.RotationStr, GUILayout.Width(120));
           GUILayout.EndHorizontal();
 
           // Scale
@@ -582,13 +597,14 @@ namespace GifDisplay
 
       rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 0.5f);
 
+      // 位置
       float percentX = inst.Settings.PosX / 100f;
       float percentY = inst.Settings.PosY / 100f;
-
       float xOffset = (percentX - 0.5f) * cachedLogicalWidth;
       float yOffset = (percentY - 0.5f) * cachedLogicalHeight;
       rect.anchoredPosition = new Vector2(xOffset, yOffset);
 
+      // 尺寸
       if (inst.Display.gifWidth > 0 && inst.Display.gifHeight > 0)
       {
         float width = inst.Display.gifWidth * inst.Settings.Scale;
@@ -600,6 +616,10 @@ namespace GifDisplay
         rect.sizeDelta = new Vector2(150 * inst.Settings.Scale, 150 * inst.Settings.Scale);
       }
 
+      // 旋转（新增）
+      rect.localEulerAngles = new Vector3(0, 0, inst.Settings.Rotation);
+
+      // 透明度
       if (!ReferenceEquals(rawImage, null))
       {
         Color c = rawImage.color;

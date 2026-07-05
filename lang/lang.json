@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "key": "rotation",
+      "en": "Rotation",
+      "zh": "旋转",
+      "ko": "회전"
+    },
+    {
       "key": "path_error_0",
       "en": "Invalid input, no image format explicitly specified.",
       "zh": "无效输入, 没有显式指定的图片格式",

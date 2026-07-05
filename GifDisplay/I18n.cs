@@ -10,9 +10,10 @@ namespace GifDisplay
   {
     private static readonly Dictionary<string, string> en = new()
     {
-      ["language"]="Language:",
+      ["language"] = "Language:",
       ["update_interval"] = "Update Interval",
-      ["update_interval_desc"] = "Controls how often image visibility is updated. Lower values respond faster, higher values improve performance.",
+      ["update_interval_desc"] =
+        "Controls how often image visibility is updated. Lower values respond faster, higher values improve performance.",
       ["add_new_image"] = "Add New Image",
       ["path"] = "Path:",
       ["add"] = "Add",
@@ -22,6 +23,7 @@ namespace GifDisplay
       ["no_image"] = "No Image",
       ["x_percent"] = "X (%)",
       ["y_percent"] = "Y (%)",
+      ["rotation"] = "Rotation",
       ["scale"] = "Scale",
       ["opacity"] = "Opacity",
       ["sorting_order"] = "Sorting Order",
@@ -39,9 +41,9 @@ namespace GifDisplay
 
     private static readonly Dictionary<string, string> zh = new()
     {
-      ["language"]="语言:",
-      ["update_interval"]="图片显示状态更新间隔(/帧)",
-      ["update_interval_desc"]="控制更新图片显示状态的频率。数值越低响应越快，数值越高性能越好",
+      ["language"] = "语言:",
+      ["update_interval"] = "图片显示状态更新间隔(/帧)",
+      ["update_interval_desc"] = "控制更新图片显示状态的频率。数值越低响应越快，数值越高性能越好",
       ["add_new_image"] = "添加新图片",
       ["path"] = "路径:",
       ["add"] = "添加",
@@ -51,6 +53,7 @@ namespace GifDisplay
       ["no_image"] = "无图片",
       ["x_percent"] = "X (%)",
       ["y_percent"] = "Y (%)",
+      ["rotation"] = "旋转",
       ["scale"] = "缩放",
       ["opacity"] = "透明度",
       ["sorting_order"] = "排序顺序",
@@ -61,14 +64,14 @@ namespace GifDisplay
       ["confirm"] = "确认删除?",
       ["image"] = "图片",
       ["reloading"] = "重新加载中...",
-      ["path_error_0"]="无效输入, 没有显式指定的图片格式",
-      ["path_error_1"]="不支持的图片格式",
-      ["path_error_2"]="无效路径,请检查文件是否存在",
+      ["path_error_0"] = "无效输入, 没有显式指定的图片格式",
+      ["path_error_1"] = "不支持的图片格式",
+      ["path_error_2"] = "无效路径,请检查文件是否存在",
     };
 
     private static readonly Dictionary<string, string> ko = new()
     {
-      ["language"]="언어:",
+      ["language"] = "언어:",
       ["update_interval"] = "업데이트 간격",
       ["update_interval_desc"] = "이미지 표시 상태 업데이트 빈도를 제어합니다. 값이 낮을수록 응답이 빠르고, 높을수록 성능이 향상됩니다.",
       ["add_new_image"] = "새 이미지 추가",
@@ -80,6 +83,7 @@ namespace GifDisplay
       ["no_image"] = "이미지 없음",
       ["x_percent"] = "X (%)",
       ["y_percent"] = "Y (%)",
+      ["rotation"] = "회전",
       ["scale"] = "크기 조정",
       ["opacity"] = "투명도",
       ["sorting_order"] = "정렬 순서",
