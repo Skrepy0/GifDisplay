@@ -254,19 +254,8 @@ namespace GifDisplay
 
     private void AddCache(string key)
     {
-      if (GifCache.TryGetValue(key, out var existing))
-      {
-        Release(existing.Textures);
-        GifCache[key] = new CachedGif
-        {
-          Textures = _gifTextures,
-          Delays = _gifDelays,
-          Width = gifWidth,
-          Height = gifHeight
-        };
+      if (GifCache.ContainsKey(key))
         return;
-      }
-
       // FIFO 淘汰
       while (GifCache.Count >= MaxCache && CacheOrder.Count > 0)
       {
