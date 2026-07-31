@@ -1,5 +1,7 @@
 using UnityEngine;
 
+namespace GifDisplay;
+
 public class CanvasSizeListener : MonoBehaviour
 {
   public System.Action OnSizeChanged;
