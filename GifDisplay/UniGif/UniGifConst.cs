@@ -12,10 +12,10 @@ using UnityEngine;
 
 public static partial class UniGif
 {
-    /// <summary>
-    ///   Gif Texture
-    /// </summary>
-    public class GifTexture
+  /// <summary>
+  ///   Gif Texture
+  /// </summary>
+  public class GifTexture
   {
     // Delay time until the next texture.
     public float m_delaySec;
@@ -30,10 +30,10 @@ public static partial class UniGif
     }
   }
 
-    /// <summary>
-    ///   GIF Data Format
-    /// </summary>
-    private struct GifData
+  /// <summary>
+  ///   GIF Data Format
+  /// </summary>
+  private struct GifData
   {
     // Signature
     public byte m_sig0, m_sig1, m_sig2;
@@ -127,10 +127,10 @@ public static partial class UniGif
     }
   }
 
-    /// <summary>
-    ///   Image Block
-    /// </summary>
-    private struct ImageBlock
+  /// <summary>
+  ///   Image Block
+  /// </summary>
+  private struct ImageBlock
   {
     // Image Separator
     public byte m_imageSeparator;
@@ -178,10 +178,10 @@ public static partial class UniGif
     }
   }
 
-    /// <summary>
-    ///   Graphic Control Extension
-    /// </summary>
-    private struct GraphicControlExtension
+  /// <summary>
+  ///   Graphic Control Extension
+  /// </summary>
+  private struct GraphicControlExtension
   {
     // Extension Introducer
     public byte m_extensionIntroducer;
@@ -208,10 +208,10 @@ public static partial class UniGif
     public byte m_blockTerminator;
   }
 
-    /// <summary>
-    ///   Comment Extension
-    /// </summary>
-    private struct CommentExtension
+  /// <summary>
+  ///   Comment Extension
+  /// </summary>
+  private struct CommentExtension
   {
     // Extension Introducer
     public byte m_extensionIntroducer;
@@ -232,10 +232,10 @@ public static partial class UniGif
     }
   }
 
-    /// <summary>
-    ///   Plain Text Extension
-    /// </summary>
-    private struct PlainTextExtension
+  /// <summary>
+  ///   Plain Text Extension
+  /// </summary>
+  private struct PlainTextExtension
   {
     // Extension Introducer
     public byte m_extensionIntroducer;
@@ -259,10 +259,10 @@ public static partial class UniGif
     }
   }
 
-    /// <summary>
-    ///   Application Extension
-    /// </summary>
-    private struct ApplicationExtension
+  /// <summary>
+  ///   Application Extension
+  /// </summary>
+  private struct ApplicationExtension
   {
     // Extension Introducer
     public byte m_extensionIntroducer;

@@ -1,15 +1,16 @@
+using System;
 using UnityEngine;
 
 namespace GifDisplay;
 
 public class CanvasSizeListener : MonoBehaviour
 {
-  public System.Action OnSizeChanged;
+  private Vector2 lastSize;
+  public Action OnSizeChanged;
 
   private RectTransform rectTransform;
-  private Vector2 lastSize;
 
-  void Awake()
+  private void Awake()
   {
     rectTransform = GetComponent<RectTransform>();
     if (rectTransform == null)
@@ -17,9 +18,9 @@ public class CanvasSizeListener : MonoBehaviour
     lastSize = rectTransform.rect.size;
   }
 
-  void OnRectTransformDimensionsChange()
+  private void OnRectTransformDimensionsChange()
   {
-    Vector2 currentSize = rectTransform.rect.size;
+    var currentSize = rectTransform.rect.size;
     if (currentSize != lastSize)
     {
       lastSize = currentSize;

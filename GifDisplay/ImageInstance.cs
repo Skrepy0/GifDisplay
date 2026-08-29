@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -5,27 +6,27 @@ namespace GifDisplay;
 
 public class ImageInstance
 {
-  public GameObject GameObject;
-  public Display Display;
   public readonly SettingsData Settings;
-  public string PosXStr;
-  public string PosYStr;
-  public string RotationStr;
-  public string ScaleStr;
-  public string OpacityStr;
-  public bool ConfirmDelete;
-  public string SortingOrderStr;
-
-  // Cached components to avoid repeated GetComponent calls
-  public RectTransform RectTransform;
-  public RawImage RawImage;
   public Canvas ChildCanvas;
+  public bool ConfirmDelete;
+  public Display Display;
+  public GameObject GameObject;
 
   // Event handler reference for proper unsubscription
-  public System.Action GifLoadedHandler;
+  public Action GifLoadedHandler;
 
   // Lazy loading state
   public bool IsLoaded;
+  public string OpacityStr;
+  public string PosXStr;
+  public string PosYStr;
+  public RawImage RawImage;
+
+  // Cached components to avoid repeated GetComponent calls
+  public RectTransform RectTransform;
+  public string RotationStr;
+  public string ScaleStr;
+  public string SortingOrderStr;
 
   public ImageInstance(SettingsData data)
   {

@@ -11,14 +11,14 @@ using UnityEngine;
 
 public static partial class UniGif
 {
-    /// <summary>
-    ///   Set GIF data
-    /// </summary>
-    /// <param name="gifBytes">GIF byte data</param>
-    /// <param name="gifData">ref GIF data</param>
-    /// <param name="debugLog">Debug log flag</param>
-    /// <returns>Result</returns>
-    private static bool SetGifData(byte[] gifBytes, ref GifData gifData, bool debugLog)
+  /// <summary>
+  ///   Set GIF data
+  /// </summary>
+  /// <param name="gifBytes">GIF byte data</param>
+  /// <param name="gifData">ref GIF data</param>
+  /// <param name="debugLog">Debug log flag</param>
+  /// <returns>Result</returns>
+  private static bool SetGifData(byte[] gifBytes, ref GifData gifData, bool debugLog)
   {
     if (debugLog) Debug.Log("SetGifData Start.");
 

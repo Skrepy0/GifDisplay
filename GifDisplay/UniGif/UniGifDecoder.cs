@@ -4,6 +4,7 @@ Copyright (c) 2015 WestHillApps (Hironari Nishioka)
 This software is released under the MIT License.
 http://opensource.org/licenses/mit-license.php
 */
+// modified by Skrepy2233 in 2026/8/29
 
 using System;
 using System.Collections;
@@ -18,6 +19,17 @@ public static partial class UniGif
 
   // Cached transparent color to avoid repeated allocations
   private static readonly Color32 TransparentColor = new(0, 0, 0, 0);
+
+  // Pre-generated single-byte dictionary entries (immutable, safe to reuse)
+  private static readonly byte[][] SingleByteDict = InitSingleByteDict();
+
+  private static byte[][] InitSingleByteDict()
+  {
+    var arr = new byte[256][];
+    for (var i = 0; i < 256; i++)
+      arr[i] = new[] { (byte)i };
+    return arr;
+  }
 
   /// <summary>
   ///   Decode to textures from GIF data
@@ -34,6 +46,8 @@ public static partial class UniGif
 
     var gifTexList = new List<GifTexture>(gifData.m_imageBlockList.Count);
     var disposalMethodList = new List<ushort>(gifData.m_imageBlockList.Count);
+    // CPU-side pixel buffers to avoid GPU readback (GetPixels32) every frame
+    var cpuPixelBuffers = new List<Color32[]>();
 
     var imgIndex = 0;
     ImageBlock? prevImageBlock = null;
@@ -52,13 +66,10 @@ public static partial class UniGif
       Color32 bgColor;
       var colorTable = GetColorTableAndSetBgColor(gifData, imageBlock, transparentIndex, out bgColor);
 
-      yield return 0;
-
       bool filledTexture;
-      var tex = CreateTexture2D(gifData, gifTexList, imgIndex, disposalMethodList, bgColor, filterMode, wrapMode,
-        out filledTexture, prevImageBlock, out var pixelBuffer);
-
-      yield return 0;
+      Color32[] pixelBuffer;
+      var tex = CreateTexture2D(gifData, cpuPixelBuffers, imgIndex, disposalMethodList, bgColor, filterMode, wrapMode,
+        out filledTexture, prevImageBlock, out pixelBuffer);
 
       // Compose frame into pixelBuffer (single upload after loop)
       var dataIndex = 0;
@@ -70,7 +81,8 @@ public static partial class UniGif
       tex.SetPixels32(pixelBuffer);
       tex.Apply();
 
-      yield return 0;
+      // Store CPU-side copy for next frame compositing (avoids GPU readback)
+      cpuPixelBuffers.Add(pixelBuffer);
 
       var delaySec = GetDelaySec(graphicCtrlEx);
 
@@ -93,32 +105,52 @@ public static partial class UniGif
   /// </summary>
   private static byte[] GetDecodedData(ImageBlock imgBlock)
   {
-    // Combine LZW compressed data
-    var lzwData = new List<byte>();
+    // Combine LZW compressed data into a contiguous buffer
+    var totalLen = 0;
     for (var i = 0; i < imgBlock.m_imageDataList.Count; i++)
-    for (var k = 0; k < imgBlock.m_imageDataList[i].m_imageData.Length; k++)
-      lzwData.Add(imgBlock.m_imageDataList[i].m_imageData[k]);
+      totalLen += imgBlock.m_imageDataList[i].m_imageData.Length;
+
+    var lzwData = new byte[totalLen];
+    var offset = 0;
+    for (var i = 0; i < imgBlock.m_imageDataList.Count; i++)
+    {
+      var block = imgBlock.m_imageDataList[i].m_imageData;
+      Buffer.BlockCopy(block, 0, lzwData, offset, block.Length);
+      offset += block.Length;
+    }
 
     // LZW decode
     var needDataSize = imgBlock.m_imageHeight * imgBlock.m_imageWidth;
     var decodedData = DecodeGifLZW(lzwData, imgBlock.m_lzwMinimumCodeSize, needDataSize);
 
     // Sort interlace GIF
-    if (imgBlock.m_interlaceFlag) decodedData = SortInterlaceGifData(decodedData, imgBlock.m_imageWidth);
+    if (imgBlock.m_interlaceFlag)
+      decodedData = SortInterlaceGifData(decodedData, imgBlock.m_imageWidth);
     return decodedData;
   }
 
   /// <summary>
   ///   Get color table and set background color (local or global)
   /// </summary>
-  private static List<byte[]> GetColorTableAndSetBgColor(GifData gifData, ImageBlock imgBlock, int transparentIndex,
+  private static Color32[] GetColorTableAndSetBgColor(GifData gifData, ImageBlock imgBlock, int transparentIndex,
     out Color32 bgColor)
   {
     var colorTable = imgBlock.m_localColorTableFlag ? imgBlock.m_localColorTable :
       gifData.m_globalColorTableFlag ? gifData.m_globalColorTable : null;
 
+    Color32[] colorTable32 = null;
+
     if (colorTable != null && gifData.m_bgColorIndex < colorTable.Count)
     {
+      // Convert List<byte[]> to Color32[] for fast lookup
+      var count = colorTable.Count;
+      colorTable32 = new Color32[count];
+      for (var i = 0; i < count; i++)
+      {
+        var rgb = colorTable[i];
+        colorTable32[i] = new Color32(rgb[0], rgb[1], rgb[2], 255);
+      }
+
       // Set background color from color table
       var bgRgb = colorTable[gifData.m_bgColorIndex];
       bgColor = new Color32(bgRgb[0], bgRgb[1], bgRgb[2], (byte)(transparentIndex == gifData.m_bgColorIndex ? 0 : 255));
@@ -129,7 +161,7 @@ public static partial class UniGif
       bgColor = new Color32(0, 0, 0, 0);
     }
 
-    return colorTable;
+    return colorTable32;
   }
 
   /// <summary>
@@ -179,7 +211,7 @@ public static partial class UniGif
   /// <summary>
   ///   Create Texture2D object and initial pixel buffer (no GPU upload yet)
   /// </summary>
-  private static Texture2D CreateTexture2D(GifData gifData, List<GifTexture> gifTexList, int imgIndex,
+  private static Texture2D CreateTexture2D(GifData gifData, List<Color32[]> cpuPixelBuffers, int imgIndex,
     List<ushort> disposalMethodList, Color32 bgColor, FilterMode filterMode, TextureWrapMode wrapMode,
     out bool filledTexture, ImageBlock? prevImageBlock, out Color32[] pixelBuffer)
   {
@@ -247,7 +279,8 @@ public static partial class UniGif
     if (useBeforeIndex >= 0)
     {
       filledTexture = true;
-      var prevPix = gifTexList[useBeforeIndex].m_texture2d.GetPixels32();
+      // Use CPU-side pixel buffer instead of GPU readback (GetPixels32)
+      var prevPix = cpuPixelBuffers[useBeforeIndex];
       Array.Copy(prevPix, pixelBuffer, prevPix.Length);
 
       // Disposal 2: clear only previous frame rect
@@ -285,19 +318,22 @@ public static partial class UniGif
   ///   Write one texture row into pixel buffer (no immediate GPU call)
   /// </summary>
   private static void WriteTexturePixelRow(Color32[] pixels, int texWidth, int texHeight, int y, ImageBlock imgBlock,
-    byte[] decodedData, ref int dataIndex, List<byte[]> colorTable, Color32 bgColor, int transparentIndex,
+    byte[] decodedData, ref int dataIndex, Color32[] colorTable, Color32 bgColor, int transparentIndex,
     bool filledTexture)
   {
     // Row no (0~)
     var row = texHeight - 1 - y;
 
+    // Check if row is within image block bounds
+    var rowInImage = row >= imgBlock.m_imageTopPosition &&
+                     row < imgBlock.m_imageTopPosition + imgBlock.m_imageHeight;
+    int imgLeft = imgBlock.m_imageLeftPosition;
+    var imgRight = imgBlock.m_imageLeftPosition + imgBlock.m_imageWidth;
+
     for (var x = 0; x < texWidth; x++)
     {
       // Out of image blocks
-      if (row < imgBlock.m_imageTopPosition ||
-          row >= imgBlock.m_imageTopPosition + imgBlock.m_imageHeight ||
-          x < imgBlock.m_imageLeftPosition ||
-          x >= imgBlock.m_imageLeftPosition + imgBlock.m_imageWidth)
+      if (!rowInImage || x < imgLeft || x >= imgRight)
       {
         // Get pixel color from bg color
         if (!filledTexture) pixels[y * texWidth + x] = ForceDisposeToTransparent ? TransparentColor : bgColor;
@@ -318,35 +354,34 @@ public static partial class UniGif
       }
 
       // Get pixel color from color table
+      var colorIndex = decodedData[dataIndex];
+      if (colorTable == null || colorTable.Length <= colorIndex)
       {
-        var colorIndex = decodedData[dataIndex];
-        if (colorTable == null || colorTable.Count <= colorIndex)
+        if (!filledTexture)
         {
-          if (!filledTexture)
-          {
-            pixels[y * texWidth + x] = ForceDisposeToTransparent ? TransparentColor : bgColor;
-            if (colorTable == null)
-              Debug.LogError("colorIndex exceeded the size of colorTable. colorTable is null. colorIndex:" +
-                             colorIndex);
-            else
-              Debug.LogError("colorIndex exceeded the size of colorTable. colorTable.Count:" + colorTable.Count +
-                             " colorIndex:" + colorIndex);
-          }
-
-          dataIndex++;
-          continue;
+          pixels[y * texWidth + x] = ForceDisposeToTransparent ? TransparentColor : bgColor;
+          if (colorTable == null)
+            Debug.LogError("colorIndex exceeded the size of colorTable. colorTable is null. colorIndex:" +
+                           colorIndex);
+          else
+            Debug.LogError("colorIndex exceeded the size of colorTable. colorTable.Count:" + colorTable.Length +
+                           " colorIndex:" + colorIndex);
         }
 
-        var rgb = colorTable[colorIndex];
+        dataIndex++;
+        continue;
+      }
 
-        // Set alpha
-        var isTransparent = transparentIndex >= 0 && transparentIndex == colorIndex;
-        var alpha = isTransparent ? (byte)0 : (byte)255;
+      // Set alpha
+      var isTransparent = transparentIndex >= 0 && transparentIndex == colorIndex;
 
-        // If transparent and we already have previous composite -> keep underlying pixel
-        if (!(filledTexture && isTransparent))
-          // Set color (single Color32 creation per pixel)
-          pixels[y * texWidth + x] = new Color32(rgb[0], rgb[1], rgb[2], alpha);
+      // If transparent and we already have previous composite -> keep underlying pixel
+      if (!(filledTexture && isTransparent))
+      {
+        // Fast path: direct Color32 lookup from pre-converted table
+        var c = colorTable[colorIndex];
+        if (isTransparent) c.a = 0;
+        pixels[y * texWidth + x] = c;
       }
 
       dataIndex++;
@@ -364,12 +399,11 @@ public static partial class UniGif
   /// <param name="lzwMinimumCodeSize">LZW minimum code size</param>
   /// <param name="needDataSize">Need decoded data size</param>
   /// <returns>Decoded data array</returns>
-  private static byte[] DecodeGifLZW(List<byte> compData, int lzwMinimumCodeSize, int needDataSize)
+  private static byte[] DecodeGifLZW(byte[] compData, int lzwMinimumCodeSize, int needDataSize)
   {
     // Safety
     if (needDataSize <= 0) return new byte[0];
     if (lzwMinimumCodeSize < 2)
-      // Per spec minimum code size for image data is at least 2 (except some malformed GIFs).
       lzwMinimumCodeSize = 2;
 
     // Spec values
@@ -377,56 +411,49 @@ public static partial class UniGif
     var endCode = clearCode + 1;
     var nextCode = endCode + 1;
     var codeSize = lzwMinimumCodeSize + 1;
-    var codeSizeLimit = 12;
+    const int codeSizeLimit = 12;
 
     // Dictionary: index -> byte sequence
-    // Preallocate 4096 max entries
     var dictionary = new byte[4096][];
-    for (var i = 0; i < clearCode; i++) dictionary[i] = new[] { (byte)i };
+    for (var i = 0; i < clearCode; i++)
+      dictionary[i] = SingleByteDict[i]; // Reuse pre-allocated entries
     dictionary[clearCode] = null; // clear
     dictionary[endCode] = null; // end
 
-    var output = new List<byte>(needDataSize);
+    // Output buffer: pre-allocated, written by index (no List<byte> overhead)
+    var output = new byte[needDataSize];
+    var outputIndex = 0;
 
     var bitPos = 0;
-    var compLen = compData.Count;
+    var compLen = compData.Length;
 
     byte[] previous = null;
 
-    // Helper local to read one LZW code (LSB first)
-    var readCode = () =>
+    while (outputIndex < needDataSize)
     {
+      // Inline readCode for performance (avoids delegate call)
       var rawCode = 0;
       var bitsRead = 0;
       while (bitsRead < codeSize)
       {
         var byteIndex = bitPos >> 3;
         if (byteIndex >= compLen)
-          // Out of data
-          return -1;
+          goto endDecode; // Out of data
         var bitIndexInByte = bitPos & 7;
-        int b = compData[byteIndex];
+        var b = compData[byteIndex];
         var bit = (b >> bitIndexInByte) & 1;
         rawCode |= bit << bitsRead;
-
         bitPos++;
         bitsRead++;
       }
 
-      return rawCode;
-    };
-
-    while (output.Count < needDataSize)
-    {
-      var code = readCode();
-      if (code < 0)
-        // Ran out of compressed data
-        break;
+      var code = rawCode;
 
       if (code == clearCode)
       {
-        // Reset dictionary
-        for (var i = 0; i < clearCode; i++) dictionary[i] = new[] { (byte)i };
+        // Reset dictionary - reuse single-byte entries (do not re-allocate)
+        for (var i = 0; i < clearCode; i++)
+          dictionary[i] = SingleByteDict[i];
         dictionary[clearCode] = null;
         dictionary[endCode] = null;
         nextCode = endCode + 1;
@@ -436,7 +463,6 @@ public static partial class UniGif
       }
 
       if (code == endCode)
-        // Normal end
         break;
 
       byte[] entry;
@@ -460,11 +486,12 @@ public static partial class UniGif
         break;
       }
 
-      // Output entry
+      // Output entry directly into buffer (no List<byte>.Add overhead)
       var copyLen = entry.Length;
-      var remaining = needDataSize - output.Count;
+      var remaining = needDataSize - outputIndex;
       if (copyLen > remaining) copyLen = remaining;
-      for (var i = 0; i < copyLen; i++) output.Add(entry[i]);
+      Buffer.BlockCopy(entry, 0, output, outputIndex, copyLen);
+      outputIndex += copyLen;
       if (copyLen < entry.Length) break; // filled needed size
 
       if (previous != null && nextCode < dictionary.Length)
@@ -483,76 +510,54 @@ public static partial class UniGif
       previous = entry;
     }
 
-    if (output.Count < needDataSize)
+    endDecode:
+    if (outputIndex < needDataSize)
     {
       // Pad (rare; malformed GIF) with zeros to expected size
-      var pad = needDataSize - output.Count;
-      for (var i = 0; i < pad; i++) output.Add(0);
+      var padLen = needDataSize - outputIndex;
+      for (var i = 0; i < padLen; i++) output[outputIndex + i] = 0;
     }
 
-    return output.ToArray();
+    return output;
   }
 
   /// <summary>
-  ///   Sort interlace GIF data
+  ///   Sort interlace GIF data - single-pass optimized
   /// </summary>
   /// <param name="decodedData">Decoded GIF data</param>
   /// <param name="xNum">Pixel number of horizontal row</param>
   /// <returns>Sorted data</returns>
   private static byte[] SortInterlaceGifData(byte[] decodedData, int xNum)
   {
-    var rowNo = 0;
-    var dataIndex = 0;
     var newArr = new byte[decodedData.Length];
-    // Every 8th. row, starting with row 0.
-    for (var i = 0; i < newArr.Length; i++)
+    var dataIndex = 0;
+    var totalRows = decodedData.Length / xNum;
+
+    // Interlace pattern: rows are grouped in 4 passes
+    // Pass 1: every 8th row starting at 0
+    // Pass 2: every 8th row starting at 4
+    // Pass 3: every 4th row starting at 2
+    // Pass 4: every 2nd row starting at 1
+    // Single pass: for each row, determine which pass it belongs to
+    for (var row = 0; row < totalRows; row++)
     {
-      if (rowNo % 8 == 0)
-      {
-        newArr[i] = decodedData[dataIndex];
-        dataIndex++;
-      }
+      // Determine if this row is active in current pass logic
+      int pass;
+      if (row % 8 == 0)
+        pass = 1;
+      else if (row % 8 == 4)
+        pass = 2;
+      else if (row % 4 == 2)
+        pass = 3;
+      else if (row % 2 == 1)
+        pass = 4;
+      else
+        continue; // Should not happen for valid GIF
 
-      if (i != 0 && i % xNum == 0) rowNo++;
-    }
-
-    rowNo = 0;
-    // Every 8th. row, starting with row 4.
-    for (var i = 0; i < newArr.Length; i++)
-    {
-      if (rowNo % 8 == 4)
-      {
-        newArr[i] = decodedData[dataIndex];
-        dataIndex++;
-      }
-
-      if (i != 0 && i % xNum == 0) rowNo++;
-    }
-
-    rowNo = 0;
-    // Every 4th. row, starting with row 2.
-    for (var i = 0; i < newArr.Length; i++)
-    {
-      if (rowNo % 4 == 2)
-      {
-        newArr[i] = decodedData[dataIndex];
-        dataIndex++;
-      }
-
-      if (i != 0 && i % xNum == 0) rowNo++;
-    }
-
-    rowNo = 0;
-    // Every 2nd. row, starting with row 1.
-    for (var i = 0; i < newArr.Length; i++)
-    {
-      if (rowNo % 8 != 0 && rowNo % 8 != 4 && rowNo % 4 != 2)
-      {
-        newArr[i] = decodedData[dataIndex];
-        dataIndex++;
-      }
-
-      if (i != 0 && i % xNum == 0) rowNo++;
+      // Calculate source index for this row
+      var srcOffset = row * xNum;
+      Buffer.BlockCopy(decodedData, srcOffset, newArr, dataIndex, xNum);
+      dataIndex += xNum;
     }
 
     return newArr;

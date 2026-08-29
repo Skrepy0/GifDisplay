@@ -6,13 +6,13 @@ using UnityEngine;
 /// </summary>
 public static class UniGifExtension
 {
-    /// <summary>
-    ///   Convert BitArray to int (Specifies the start index and bit length)
-    /// </summary>
-    /// <param name="startIndex">Start index</param>
-    /// <param name="bitLength">Bit length</param>
-    /// <returns>Converted int</returns>
-    public static int GetNumeral(this BitArray array, int startIndex, int bitLength)
+  /// <summary>
+  ///   Convert BitArray to int (Specifies the start index and bit length)
+  /// </summary>
+  /// <param name="startIndex">Start index</param>
+  /// <param name="bitLength">Bit length</param>
+  /// <returns>Converted int</returns>
+  public static int GetNumeral(this BitArray array, int startIndex, int bitLength)
   {
     var newArray = new BitArray(bitLength);
 
@@ -30,11 +30,11 @@ public static class UniGifExtension
     return newArray.ToNumeral();
   }
 
-    /// <summary>
-    ///   Convert BitArray to int
-    /// </summary>
-    /// <returns>Converted int</returns>
-    public static int ToNumeral(this BitArray array)
+  /// <summary>
+  ///   Convert BitArray to int
+  /// </summary>
+  /// <returns>Converted int</returns>
+  public static int ToNumeral(this BitArray array)
   {
     if (array == null)
     {
