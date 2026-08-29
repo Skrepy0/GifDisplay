@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.UI;
 
 namespace GifDisplay;
 
@@ -15,10 +16,32 @@ public class ImageInstance
   public bool ConfirmDelete;
   public string SortingOrderStr;
 
+  // Cached components to avoid repeated GetComponent calls
+  public RectTransform RectTransform;
+  public RawImage RawImage;
+  public Canvas ChildCanvas;
+
+  // Event handler reference for proper unsubscription
+  public System.Action GifLoadedHandler;
+
+  // Lazy loading state
+  public bool IsLoaded;
+
   public ImageInstance(SettingsData data)
   {
     Settings = data;
     UpdateStrings();
+  }
+
+  public void CacheComponents()
+  {
+    if (GameObject != null)
+    {
+      RectTransform = GameObject.GetComponent<RectTransform>();
+      RawImage = GameObject.GetComponent<RawImage>();
+      ChildCanvas = GameObject.GetComponent<Canvas>();
+      Display = GameObject.GetComponent<Display>();
+    }
   }
 
   public void UpdateStrings()

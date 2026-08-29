@@ -1,4 +1,5 @@
-﻿using System.Collections;
+﻿using System;
+using System.Collections;
 using UnityEngine;
 using UnityEngine.UI;
 using System.Collections.Generic;
@@ -26,8 +27,8 @@ namespace GifDisplay
     public int gifWidth { get; private set; }
     public int gifHeight { get; private set; }
 
-    public System.Action OnGifLoaded;
-    public static System.Action<string> LogErrorCallback;
+    public Action OnGifLoaded;
+    public static Action<string> LogErrorCallback;
 
     public bool isLoaded { get; private set; }
 
@@ -103,7 +104,7 @@ namespace GifDisplay
 
       string cacheKey = localPath;
 
-      // 检查缓存
+      // Check cache first
       if (GifCache.TryGetValue(cacheKey, out var cached))
       {
         ApplyCache(cached);
@@ -111,14 +112,32 @@ namespace GifDisplay
         yield break;
       }
 
-      byte[] fileData;
-      try
+      // Async file loading on background thread
+      byte[] fileData = null;
+      Exception loadException = null;
+      bool isDone = false;
+
+      System.Threading.ThreadPool.QueueUserWorkItem(_ =>
       {
-        fileData = File.ReadAllBytes(localPath);
-      }
-      catch (System.Exception ex)
+        try
+        {
+          fileData = File.ReadAllBytes(localPath);
+        }
+        catch (Exception ex)
+        {
+          loadException = ex;
+        }
+        finally
+        {
+          isDone = true;
+        }
+      });
+
+      yield return new WaitUntil(() => isDone);
+
+      if (loadException != null)
       {
-        LogErrorCallback?.Invoke(ex.Message);
+        LogErrorCallback?.Invoke(loadException.Message);
         _loadCoroutine = null;
         yield break;
       }
@@ -140,8 +159,6 @@ namespace GifDisplay
 
       _loadCoroutine = null;
     }
-
-    // ================= STATIC =================
 
     private IEnumerator LoadStatic(byte[] fileData, string ext, string cacheKey)
     {
@@ -307,7 +324,7 @@ namespace GifDisplay
 
     // ================= RELEASE =================
 
-    private void Release(Texture2D[] textures)
+    private static void Release(Texture2D[] textures)
     {
       if (textures == null)
         return;
@@ -360,6 +377,22 @@ namespace GifDisplay
       _currentTexture = null;
       _gifTextures = null;
       _gifDelays = null;
+
+      // Clean up cache entry when this instance is destroyed
+      RemoveCacheEntry(localPath);
+    }
+
+    // ================= CACHE =================
+
+    public static void RemoveCacheEntry(string key)
+    {
+      if (string.IsNullOrEmpty(key)) return;
+      if (GifCache.TryGetValue(key, out var cached))
+      {
+        Release(cached.Textures);
+        GifCache.Remove(key);
+        CacheOrder.Remove(key);
+      }
     }
 
     void OnApplicationQuit()

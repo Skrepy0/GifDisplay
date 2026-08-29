@@ -42,11 +42,19 @@ namespace GifDisplay
     private static int pathErrorCode = -1;
     public static readonly string[] ValidFormat = new[] { "png", "jpg", "jpeg", "gif" };
 
-    // 控制器缓存与查找优化
+    // Controller cache optimization
     private static scrController cachedController;
     private static int findControllerFrameCounter;
     private static bool controllerNotFound;
     private static int stateUpdateCounter;
+
+    // CanvasSizeListener reference for cleanup
+    private static CanvasSizeListener canvasSizeListener;
+
+    // Debounced save
+    private static float saveDebounceTimer;
+    private static bool pendingSave;
+    private static readonly float SAVE_DEBOUNCE_TIME = 0.5f;
 
     public static bool Load(UnityModManager.ModEntry entry)
     {
@@ -103,6 +111,18 @@ namespace GifDisplay
         UpdateAllInstances();
       }
 
+      // Handle debounced save
+      if (pendingSave)
+      {
+        saveDebounceTimer += delta;
+        if (saveDebounceTimer >= SAVE_DEBOUNCE_TIME)
+        {
+          saveDebounceTimer = 0f;
+          pendingSave = false;
+          SaveSettings();
+        }
+      }
+
       stateUpdateCounter++;
       if (stateUpdateCounter % updateInterval == 0)
       {
@@ -113,9 +133,25 @@ namespace GifDisplay
 
     private static bool OnUnload(UnityModManager.ModEntry entry)
     {
+      // Unsubscribe from CanvasSizeListener
+      if (canvasSizeListener != null)
+      {
+        canvasSizeListener.OnSizeChanged -= OnCanvasSizeChanged;
+        canvasSizeListener = null;
+      }
+
+      // Unsubscribe event handlers from all instances
       foreach (var inst in Instances)
+      {
+        if (inst.Display != null && inst.GifLoadedHandler != null)
+        {
+          inst.Display.OnGifLoaded -= inst.GifLoadedHandler;
+        }
+
         if (inst.GameObject != null)
           Object.Destroy(inst.GameObject);
+      }
+
       Instances.Clear();
       if (canvasObject != null)
         Object.Destroy(canvasObject);
@@ -182,7 +218,7 @@ namespace GifDisplay
       if (newUpdateInterval != updateInterval)
       {
         updateInterval = newUpdateInterval;
-        SaveSettings();
+        RequestSaveSettings();
       }
 
       GUILayout.Space(10);
@@ -316,7 +352,7 @@ namespace GifDisplay
           if (imagePath != settings.PicGifPath)
           {
             settings.PicGifPath = imagePath;
-            SaveSettings();
+            RequestSaveSettings();
           }
 
           GUILayout.Space(10);
@@ -458,6 +494,13 @@ namespace GifDisplay
           {
             if (inst.ConfirmDelete)
             {
+              // Unsubscribe event handler before destroying
+              if (inst.Display != null && inst.GifLoadedHandler != null)
+              {
+                inst.Display.OnGifLoaded -= inst.GifLoadedHandler;
+                inst.GifLoadedHandler = null;
+              }
+
               if (inst.GameObject != null)
                 Object.Destroy(inst.GameObject);
               Instances.RemoveAt(i);
@@ -479,7 +522,7 @@ namespace GifDisplay
         if (changed)
         {
           UpdateInstanceTransform(inst);
-          SaveSettings();
+          RequestSaveSettings();
           ApplyVisibilityRules();
         }
       }
@@ -509,10 +552,16 @@ namespace GifDisplay
       canvasScaler.matchWidthOrHeight = 0.5f;
 
       var listener = canvasObject.AddComponent<CanvasSizeListener>();
-      listener.OnSizeChanged += () => { needUpdate = true; };
+      canvasSizeListener = listener;
+      listener.OnSizeChanged += OnCanvasSizeChanged;
 
       Object.DontDestroyOnLoad(canvasObject);
       return true;
+    }
+
+    private static void OnCanvasSizeChanged()
+    {
+      needUpdate = true;
     }
 
     private static void UpdateCachedLogicalSize()
@@ -536,8 +585,6 @@ namespace GifDisplay
     {
       if (canvasObject == null) return;
 
-      var inst = new ImageInstance(data);
-
       var go = new GameObject("GifImage");
       go.transform.SetParent(canvasObject.transform, false);
       go.SetActive(true);
@@ -559,10 +606,17 @@ namespace GifDisplay
       var display = go.AddComponent<Display>();
       display.rawImage = rawImage;
 
-      inst.GameObject = go;
-      inst.Display = display;
+      var inst = new ImageInstance(data)
+      {
+        GameObject = go,
+        Display = display,
+        RectTransform = rect,
+        RawImage = rawImage,
+        ChildCanvas = childCanvas
+      };
 
-      display.OnGifLoaded += () =>
+      // Store event handler for proper cleanup
+      inst.GifLoadedHandler = () =>
       {
         UpdateInstanceTransform(inst);
         if (!loading && !isReloading)
@@ -570,6 +624,7 @@ namespace GifDisplay
         if (isReloading)
           isReloading = false;
       };
+      display.OnGifLoaded += inst.GifLoadedHandler;
 
       display.localPath = data.PicGifPath;
       display.Reload(true);
@@ -581,19 +636,18 @@ namespace GifDisplay
     // ---------- 更新实例排序 ----------
     private static void UpdateInstanceSorting(ImageInstance inst)
     {
-      if (inst.GameObject == null) return;
-      var childCanvas = inst.GameObject.GetComponent<Canvas>();
-      if (childCanvas != null)
-        childCanvas.sortingOrder = inst.Settings.SortingOrder;
+      if (inst.ChildCanvas != null)
+        inst.ChildCanvas.sortingOrder = inst.Settings.SortingOrder;
     }
 
     // ---------- 变换更新 ----------
     private static void UpdateInstanceTransform(ImageInstance inst)
     {
-      if (ReferenceEquals(inst.GameObject, null) || ReferenceEquals(inst.Display, null)) return;
+      if (inst.GameObject == null || inst.Display == null) return;
 
-      var rect = inst.GameObject.GetComponent<RectTransform>();
-      var rawImage = inst.GameObject.GetComponent<RawImage>();
+      var rect = inst.RectTransform;
+      var rawImage = inst.RawImage;
+      if (rect == null || rawImage == null) return;
 
       rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 0.5f);
 
@@ -620,12 +674,9 @@ namespace GifDisplay
       rect.localEulerAngles = new Vector3(0, 0, inst.Settings.Rotation);
 
       // 透明度
-      if (!ReferenceEquals(rawImage, null))
-      {
-        Color c = rawImage.color;
-        c.a = inst.Settings.Opacity;
-        rawImage.color = c;
-      }
+      Color c = rawImage.color;
+      c.a = inst.Settings.Opacity;
+      rawImage.color = c;
     }
 
     private static void UpdateAllInstances()
@@ -751,7 +802,16 @@ namespace GifDisplay
         {
           inst.GameObject.SetActive(shouldShow);
           if (shouldShow)
+          {
             inst.Display.Resume();
+            // Lazy load: trigger loading when becoming visible
+            if (!inst.IsLoaded)
+            {
+              inst.Display.Reload(true);
+              inst.IsLoaded = true;
+            }
+          }
+
           anyChange = true;
         }
       }
@@ -778,6 +838,13 @@ namespace GifDisplay
       root["instances"] = instancesArray;
 
       File.WriteAllText(settingsPath, root.ToString(Formatting.Indented));
+    }
+
+    // Debounced save - call this for frequent changes like slider drags
+    private static void RequestSaveSettings()
+    {
+      pendingSave = true;
+      saveDebounceTimer = 0f;
     }
 
     private static void LoadSettings()
@@ -835,8 +902,18 @@ namespace GifDisplay
     public static void ClearAll()
     {
       foreach (var inst in Instances)
+      {
+        // Unsubscribe event handler before destroying
+        if (inst.Display != null && inst.GifLoadedHandler != null)
+        {
+          inst.Display.OnGifLoaded -= inst.GifLoadedHandler;
+          inst.GifLoadedHandler = null;
+        }
+
         if (inst.GameObject != null)
           Object.Destroy(inst.GameObject);
+      }
+
       Instances.Clear();
     }
   }
