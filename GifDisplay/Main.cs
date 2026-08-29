@@ -1,8 +1,10 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Threading;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
@@ -34,8 +36,9 @@ public class Main
 
   private static bool loading;
   private static bool isReloading;
+  private static bool isPreviewLoading;
 
-  private static readonly List<bool> expandedStates = new(); // 每个实例的展开状态
+  private static readonly List<bool> ExpandedStates = new(); // 每个实例的展开状态
 
   private static int updateInterval = 5; // 每 5 帧更新一次
 
@@ -54,7 +57,7 @@ public class Main
   // Debounced save
   private static float saveDebounceTimer;
   private static bool pendingSave;
-  private static readonly float SAVE_DEBOUNCE_TIME = 0.5f;
+  private static readonly float SaveDebounceTime = 0.5f;
 
   public static bool Load(UnityModManager.ModEntry entry)
   {
@@ -77,6 +80,7 @@ public class Main
     I18n.Load(entry.Path);
 
     loading = true;
+    isPreviewLoading = true;
     LoadSettings();
     loading = false;
 
@@ -85,6 +89,10 @@ public class Main
 
     UpdateGamePlayState();
     ApplyVisibilityRules();
+
+    // Wait for all preloads to complete before finishing initialization
+    // This ensures preloaded instances have their textures ready when entering game
+    canvasObject.GetComponent<MonoBehaviour>().StartCoroutine(WaitForPreloads());
 
     modEntry.Logger.Log($"Initial game playing state: {isGamePlaying}, instances: {Instances.Count}");
     modEntry.Logger.Log($"GifDisplay Mod loaded with {Instances.Count} instances");
@@ -115,7 +123,7 @@ public class Main
     if (pendingSave)
     {
       saveDebounceTimer += delta;
-      if (saveDebounceTimer >= SAVE_DEBOUNCE_TIME)
+      if (saveDebounceTimer >= SaveDebounceTime)
       {
         saveDebounceTimer = 0f;
         pendingSave = false;
@@ -157,10 +165,10 @@ public class Main
 
   private static void SyncExpandedStates()
   {
-    while (expandedStates.Count < Instances.Count)
-      expandedStates.Add(false);
-    while (expandedStates.Count > Instances.Count)
-      expandedStates.RemoveAt(expandedStates.Count - 1);
+    while (ExpandedStates.Count < Instances.Count)
+      ExpandedStates.Add(false);
+    while (ExpandedStates.Count > Instances.Count)
+      ExpandedStates.RemoveAt(ExpandedStates.Count - 1);
   }
 
   private static void PurifyString(ref string str)
@@ -306,28 +314,24 @@ public class Main
       var changed = false;
 
       // 确保展开状态列表足够
-      if (expandedStates.Count <= i)
-        expandedStates.Add(false);
+      if (ExpandedStates.Count <= i)
+        ExpandedStates.Add(false);
 
       GUILayout.BeginVertical("box");
       GUILayout.BeginHorizontal();
 
       // 编号（点击可切换折叠）
-      if (GUILayout.Button($"#{i + 1}", GUILayout.Width(100))) expandedStates[i] = !expandedStates[i];
+      if (GUILayout.Button($"#{i + 1}", GUILayout.Width(100))) ExpandedStates[i] = !ExpandedStates[i];
 
       GUILayout.Space(25);
-      GUILayout.Label(expandedStates[i] ? "▼" : "▶", GUILayout.Width(50));
+      GUILayout.Label(ExpandedStates[i] ? "▼" : "▶", GUILayout.Width(50));
       GUILayout.Space(25);
       // 预览（始终显示）
-      Texture tex = null;
-      if (inst.Display != null)
-        tex = inst.Display.previewTexture;
+      Texture tex = inst.Display?.previewTexture;
       if (tex != null)
         GUILayout.Box(new GUIContent(tex), GUILayout.Width(80), GUILayout.Height(80));
-      else if (inst.IsLoaded)
-        GUILayout.Box(I18n.Tr("no_image"), GUILayout.Width(80), GUILayout.Height(80));
       else
-        GUILayout.Box(I18n.Tr("not_loaded"), GUILayout.Width(80), GUILayout.Height(80));
+        GUILayout.Box(I18n.Tr("no_image"), GUILayout.Width(80), GUILayout.Height(80));
 
       GUILayout.Space(25);
       // 图片路径
@@ -337,7 +341,7 @@ public class Main
       GUILayout.EndHorizontal();
 
       // ---------- 详细设置（根据展开状态显示） ----------
-      if (expandedStates[i])
+      if (ExpandedStates[i])
       {
         // 路径 + 重载
         GUILayout.BeginHorizontal();
@@ -364,7 +368,7 @@ public class Main
         GUILayout.BeginHorizontal();
         GUILayout.Label(I18n.Tr("x_percent"), GUILayout.Width(150));
         var newX = GUILayout.HorizontalSlider(settings.PosX, -100f, 100f, GUILayout.Width(1050));
-        if (newX != settings.PosX)
+        if (!Helper.AreEqual(newX, settings.PosX))
         {
           settings.PosX = newX;
           inst.PosXStr = newX.ToString("F1") + "%";
@@ -378,7 +382,7 @@ public class Main
         GUILayout.BeginHorizontal();
         GUILayout.Label(I18n.Tr("y_percent"), GUILayout.Width(150));
         var newY = GUILayout.HorizontalSlider(settings.PosY, -100f, 100f, GUILayout.Width(1050));
-        if (newY != settings.PosY)
+        if (!Helper.AreEqual(newY, settings.PosY))
         {
           settings.PosY = newY;
           inst.PosYStr = newY.ToString("F1") + "%";
@@ -392,7 +396,7 @@ public class Main
         GUILayout.BeginHorizontal();
         GUILayout.Label(I18n.Tr("rotation"), GUILayout.Width(150));
         var newRotation = GUILayout.HorizontalSlider(settings.Rotation, -360.0f, 360.0f, GUILayout.Width(1050));
-        if (newRotation != settings.Rotation)
+        if (!Helper.AreEqual(newRotation, settings.Rotation))
         {
           settings.Rotation = newRotation;
           inst.RotationStr = newRotation.ToString("F1") + "°";
@@ -406,7 +410,7 @@ public class Main
         GUILayout.BeginHorizontal();
         GUILayout.Label(I18n.Tr("scale"), GUILayout.Width(150));
         var newScale = GUILayout.HorizontalSlider(settings.Scale, 0.01f, 2.5f, GUILayout.Width(1050));
-        if (newScale != settings.Scale)
+        if (!Helper.AreEqual(newScale, settings.Scale))
         {
           settings.Scale = newScale;
           inst.ScaleStr = newScale.ToString("F2");
@@ -420,7 +424,7 @@ public class Main
         GUILayout.BeginHorizontal();
         GUILayout.Label(I18n.Tr("opacity"), GUILayout.Width(150));
         var newOpacity = GUILayout.HorizontalSlider(settings.Opacity, 0f, 1f, GUILayout.Width(1050));
-        if (newOpacity != settings.Opacity)
+        if (!Helper.AreEqual(newOpacity, settings.Opacity))
         {
           settings.Opacity = newOpacity;
           inst.OpacityStr = newOpacity.ToString("F2");
@@ -459,14 +463,6 @@ public class Main
         if (newShowDuringPlay != settings.ShowDuringPlay)
         {
           settings.ShowDuringPlay = newShowDuringPlay;
-          // If both modes were off and now one is on, trigger load
-          if (!inst.IsLoaded && (newShowDuringPlay || settings.ShowDuringNotPlay))
-          {
-            inst.Display.enabled = true;
-            inst.Display.Reload(true);
-            inst.IsLoaded = true;
-          }
-
           // If both modes now off, unload
           if (inst.IsLoaded && !newShowDuringPlay && !settings.ShowDuringNotPlay)
           {
@@ -474,7 +470,20 @@ public class Main
             inst.IsLoaded = false;
             inst.GameObject.SetActive(false);
           }
+          else if (inst.IsLoaded)
+          {
+            // Already loaded - just let ApplyVisibilityRules handle show/hide
+            // No reload needed!
+          }
+          else
+          {
+            // Wasn't loaded before but now should be - trigger load
+            inst.Display.enabled = true;
+            inst.Display.Reload(true);
+            inst.IsLoaded = true;
+          }
 
+          ApplyVisibilityRules();
           changed = true;
         }
 
@@ -488,14 +497,6 @@ public class Main
         if (newShowDuringNotPlaying != settings.ShowDuringNotPlay)
         {
           settings.ShowDuringNotPlay = newShowDuringNotPlaying;
-          // If both modes were off and now one is on, trigger load
-          if (!inst.IsLoaded && (settings.ShowDuringPlay || newShowDuringNotPlaying))
-          {
-            inst.Display.enabled = true;
-            inst.Display.Reload(true);
-            inst.IsLoaded = true;
-          }
-
           // If both modes now off, unload
           if (inst.IsLoaded && !settings.ShowDuringPlay && !newShowDuringNotPlaying)
           {
@@ -503,7 +504,20 @@ public class Main
             inst.IsLoaded = false;
             inst.GameObject.SetActive(false);
           }
+          else if (inst.IsLoaded)
+          {
+            // Already loaded - just let ApplyVisibilityRules handle show/hide
+            // No reload needed!
+          }
+          else
+          {
+            // Wasn't loaded before but now should be - trigger load
+            inst.Display.enabled = true;
+            inst.Display.Reload(true);
+            inst.IsLoaded = true;
+          }
 
+          ApplyVisibilityRules();
           changed = true;
         }
 
@@ -531,7 +545,7 @@ public class Main
             if (inst.GameObject != null)
               Object.Destroy(inst.GameObject);
             Instances.RemoveAt(i);
-            expandedStates.RemoveAt(i); // 同步移除状态
+            ExpandedStates.RemoveAt(i); // 同步移除状态
             SaveSettings();
             GUILayout.EndVertical();
             break;
@@ -550,7 +564,8 @@ public class Main
       {
         UpdateInstanceTransform(inst);
         RequestSaveSettings();
-        ApplyVisibilityRules();
+        // Don't call ApplyVisibilityRules() here - it's already called in the toggle handlers
+        // ApplyVisibilityRules();
       }
     }
 
@@ -658,17 +673,190 @@ public class Main
     var shouldLoad = data.ShowDuringPlay || data.ShowDuringNotPlay;
     if (shouldLoad)
     {
-      // Display.Start() will trigger LoadGif() automatically
+      if (!data.ShowDuringNotPlay)
+      {
+        // Only show during play: disable display but preload the GIF data
+        display.enabled = false;
+        inst.IsLoaded = false;
+        canvasObject.GetComponent<MonoBehaviour>().StartCoroutine(PreloadAndPreview(data.PicGifPath, display, inst));
+      }
     }
     else
     {
-      // Both modes disabled: disable Display to prevent Start() from loading
       display.enabled = false;
       inst.IsLoaded = false;
+      canvasObject.GetComponent<MonoBehaviour>().StartCoroutine(LoadPreviewOnly(data.PicGifPath, display, inst));
     }
 
     UpdateInstanceTransform(inst);
     Instances.Add(inst);
+  }
+
+  private static IEnumerator WaitForPreloads()
+  {
+    // Wait until all preview/preload operations are complete
+    while (isPreviewLoading) yield return null;
+  }
+
+  private static IEnumerator PreloadAndPreview(string path, Display display, ImageInstance inst)
+  {
+    if (string.IsNullOrEmpty(path) || !File.Exists(path))
+    {
+      Helper.Log($"[{ModId}] Invalid path for preload: {path}");
+      isPreviewLoading = false;
+      yield break;
+    }
+
+    byte[] fileData = null;
+    Exception loadException = null;
+    var isDone = false;
+
+    // Async file loading on background thread
+    ThreadPool.QueueUserWorkItem(_ =>
+    {
+      try
+      {
+        fileData = File.ReadAllBytes(path);
+      }
+      catch (Exception ex)
+      {
+        loadException = ex;
+      }
+      finally
+      {
+        isDone = true;
+      }
+    });
+
+    yield return new WaitUntil(() => isDone);
+
+    if (loadException != null)
+    {
+      Helper.Log($"[{ModId}] Failed to preload: {loadException.Message}");
+      isPreviewLoading = false;
+      yield break;
+    }
+
+    var ext = Path.GetExtension(path).ToLowerInvariant();
+
+    // Handle static image: load texture, create preview, keep in _gifTextures
+    if (ext != ".gif")
+    {
+      var tex = new Texture2D(2, 2);
+      if (!tex.LoadImage(fileData))
+      {
+        Object.Destroy(tex);
+        isPreviewLoading = false;
+        yield break;
+      }
+
+      display.SetPreloadedTextures(new[] { tex }, new[] { 0.1f }, tex.width, tex.height);
+      display.CreatePreviewFromData(tex);
+      inst.IsLoaded = true;
+      isPreviewLoading = false;
+      yield break;
+    }
+
+    // Handle GIF: decode all frames and keep them ready
+    yield return UniGif.GetTextureListCoroutine(
+      fileData,
+      (textures, loopCount, width, height) =>
+      {
+        if (textures == null || textures.Count == 0 || display is null)
+        {
+          isPreviewLoading = false;
+          return;
+        }
+
+        var texArray = new Texture2D[textures.Count];
+        var delays = new float[textures.Count];
+
+        for (var i = 0; i < textures.Count; i++)
+        {
+          texArray[i] = textures[i].m_texture2d;
+          delays[i] = textures[i].m_delaySec;
+        }
+
+        display.SetPreloadedTextures(texArray, delays, width, height);
+        display.CreatePreviewFromData(texArray[0]);
+        inst.IsLoaded = true;
+        isPreviewLoading = false;
+      });
+  }
+
+  private static IEnumerator LoadPreviewOnly(string path, Display display, ImageInstance inst)
+  {
+    if (string.IsNullOrEmpty(path) || !File.Exists(path))
+    {
+      Helper.Log($"[{ModId}] Invalid path for preview: {path}");
+      isPreviewLoading = false;
+      yield break;
+    }
+
+    byte[] fileData = null;
+    Exception loadException = null;
+    var isDone = false;
+
+    // Async file loading on background thread
+    ThreadPool.QueueUserWorkItem(_ =>
+    {
+      try
+      {
+        fileData = File.ReadAllBytes(path);
+      }
+      catch (Exception ex)
+      {
+        loadException = ex;
+      }
+      finally
+      {
+        isDone = true;
+      }
+    });
+
+    yield return new WaitUntil(() => isDone);
+
+    if (loadException != null)
+    {
+      Helper.Log($"[{ModId}] Failed to load preview: {loadException.Message}");
+      isPreviewLoading = false;
+      yield break;
+    }
+
+    var ext = Path.GetExtension(path).ToLowerInvariant();
+
+    // Handle static image formats: create a small preview copy
+    if (ext != ".gif")
+    {
+      var tex = new Texture2D(2, 2);
+      if (!tex.LoadImage(fileData))
+      {
+        Object.Destroy(tex);
+        isPreviewLoading = false;
+        yield break;
+      }
+
+      display.CreatePreviewFromData(tex);
+      Object.Destroy(tex);
+      isPreviewLoading = false;
+      yield break;
+    }
+
+    // Handle GIF: decode first frame only for preview
+    yield return UniGif.GetTextureListCoroutine(
+      fileData,
+      (textures, loopCount, width, height) =>
+      {
+        if (textures == null || textures.Count == 0 || display is null)
+        {
+          isPreviewLoading = false;
+          return;
+        }
+
+        // Create preview from first frame only
+        display.CreatePreviewFromData(textures[0].m_texture2d);
+        isPreviewLoading = false;
+      });
   }
 
   // ---------- 更新实例排序 ----------
@@ -681,11 +869,11 @@ public class Main
   // ---------- 变换更新 ----------
   private static void UpdateInstanceTransform(ImageInstance inst)
   {
-    if (inst.GameObject == null || inst.Display == null) return;
+    if (inst.GameObject is null || inst.Display is null) return;
 
     var rect = inst.RectTransform;
     var rawImage = inst.RawImage;
-    if (rect == null || rawImage == null) return;
+    if (rect is null || rawImage is null) return;
 
     rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 0.5f);
 
@@ -844,21 +1032,22 @@ public class Main
             inst.Display.enabled = true;
           inst.Display.Resume();
           // Lazy load: trigger loading when becoming visible
+          // Note: if preloaded via PreloadAndPreview, textures are already set
           if (!inst.IsLoaded)
           {
+            // Textures were unloaded - need to reload
             inst.Display.Reload(true);
             inst.IsLoaded = true;
           }
-        }
-        else
-        {
-          // Hidden: unload textures to free memory
-          if (inst.IsLoaded)
+          else if (inst.Display.isLoaded && !inst.Display.IsPlaying())
           {
-            inst.Display.Unload();
-            inst.IsLoaded = false;
+            // Preloaded textures exist but playback hasn't started
+            inst.Display.StartPlayback();
           }
         }
+        // NOTE: When hiding due to game state change, we do NOT unload textures
+        // This ensures instant resume when game state switches back
+        // Textures are only unloaded when user explicitly turns off both modes
 
         anyChange = true;
       }

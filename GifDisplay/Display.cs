@@ -27,7 +27,6 @@ public class Display : MonoBehaviour
   private Texture2D[] _gifTextures;
   private bool _isPlaying;
   private Coroutine _loadCoroutine;
-
   private Coroutine _playCoroutine;
 
   public Action OnGifLoaded;
@@ -39,7 +38,7 @@ public class Display : MonoBehaviour
 
   private bool hasTexture => _gifTextures != null && _gifTextures.Length > 0;
 
-  public Texture2D previewTexture => hasTexture ? _gifTextures[0] : null;
+  public Texture2D previewTexture { get; private set; }
 
   private void Start()
   {
@@ -77,6 +76,12 @@ public class Display : MonoBehaviour
     _gifTextures = null;
     _gifDelays = null;
 
+    if (previewTexture != null)
+    {
+      Destroy(previewTexture);
+      previewTexture = null;
+    }
+
     // Clean up cache entry when this instance is destroyed
     RemoveCacheEntry(localPath);
   }
@@ -87,6 +92,31 @@ public class Display : MonoBehaviour
 
     GifCache.Clear();
     CacheOrder.Clear();
+  }
+
+  public bool IsPlaying()
+  {
+    return _isPlaying;
+  }
+
+  public void StartPlayback()
+  {
+    if (!hasTexture)
+      return;
+
+    StopPlayback();
+
+    if (_frameIndex >= _gifTextures.Length)
+      _frameIndex = 0;
+
+    if (_gifTextures.Length == 1)
+    {
+      ApplyTexture(_gifTextures[0]);
+      return;
+    }
+
+    _isPlaying = true;
+    _playCoroutine = StartCoroutine(PlayLoop());
   }
 
   public void Resume()
@@ -190,6 +220,7 @@ public class Display : MonoBehaviour
 
     AddCache(cacheKey);
     ApplyTexture(tex);
+    CreatePreviewTexture(tex);
 
     isLoaded = true;
     OnGifLoaded?.Invoke();
@@ -220,6 +251,7 @@ public class Display : MonoBehaviour
 
         AddCache(cacheKey);
         StartPlayback();
+        CreatePreviewTexture(_gifTextures[0]);
 
         isLoaded = true;
         OnGifLoaded?.Invoke();
@@ -227,26 +259,6 @@ public class Display : MonoBehaviour
   }
 
   // ================= PLAY =================
-
-  private void StartPlayback()
-  {
-    if (!hasTexture)
-      return;
-
-    StopPlayback();
-
-    if (_frameIndex >= _gifTextures.Length)
-      _frameIndex = 0;
-
-    if (_gifTextures.Length == 1)
-    {
-      ApplyTexture(_gifTextures[0]);
-      return;
-    }
-
-    _isPlaying = true;
-    _playCoroutine = StartCoroutine(PlayLoop());
-  }
 
   private IEnumerator PlayLoop()
   {
@@ -327,6 +339,8 @@ public class Display : MonoBehaviour
     else
       StartPlayback();
 
+    CreatePreviewTexture(_gifTextures[0]);
+
     isLoaded = true;
     OnGifLoaded?.Invoke();
   }
@@ -393,6 +407,70 @@ public class Display : MonoBehaviour
     _currentTexture = null;
     _frameIndex = 0;
     isLoaded = false;
+  }
+
+  private void CreatePreviewTexture(Texture2D source)
+  {
+    if (source == null) return;
+
+    CreatePreviewFromData(source);
+  }
+
+  public void CreatePreviewFromData(Texture2D source)
+  {
+    if (source is null) return;
+
+    // Clean up previous preview texture
+    if (previewTexture is not null)
+    {
+      Destroy(previewTexture);
+      previewTexture = null;
+    }
+
+    // Create a small preview copy (max 128px for GUI preview)
+    var maxSize = 128;
+    var previewWidth = source.width;
+    var previewHeight = source.height;
+
+    if (previewWidth > maxSize || previewHeight > maxSize)
+    {
+      var ratio = (float)previewWidth / previewHeight;
+      if (previewWidth > previewHeight)
+      {
+        previewWidth = maxSize;
+        previewHeight = Mathf.RoundToInt(maxSize / ratio);
+      }
+      else
+      {
+        previewHeight = maxSize;
+        previewWidth = Mathf.RoundToInt(maxSize * ratio);
+      }
+    }
+
+    previewTexture = new Texture2D(previewWidth, previewHeight, TextureFormat.ARGB32, false);
+    previewTexture.filterMode = FilterMode.Bilinear;
+
+    // GPU-side scaled copy via RenderTexture
+    var rt = RenderTexture.GetTemporary(previewWidth, previewHeight);
+    Graphics.Blit(source, rt);
+    RenderTexture.active = rt;
+
+    previewTexture.ReadPixels(new Rect(0, 0, previewWidth, previewHeight), 0, 0);
+    previewTexture.Apply();
+
+    RenderTexture.active = null;
+    RenderTexture.ReleaseTemporary(rt);
+  }
+
+  // Called from preload: sets textures without adding to cache (preload is for future display)
+  public void SetPreloadedTextures(Texture2D[] textures, float[] delays, int width, int height)
+  {
+    _gifTextures = textures;
+    _gifDelays = delays;
+    gifWidth = width;
+    gifHeight = height;
+    _frameIndex = 0;
+    isLoaded = true;
   }
 
   // ================= CACHE =================
