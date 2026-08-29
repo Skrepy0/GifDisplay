@@ -324,8 +324,10 @@ public class Main
         tex = inst.Display.previewTexture;
       if (tex != null)
         GUILayout.Box(new GUIContent(tex), GUILayout.Width(80), GUILayout.Height(80));
-      else
+      else if (inst.IsLoaded)
         GUILayout.Box(I18n.Tr("no_image"), GUILayout.Width(80), GUILayout.Height(80));
+      else
+        GUILayout.Box(I18n.Tr("not_loaded"), GUILayout.Width(80), GUILayout.Height(80));
 
       GUILayout.Space(25);
       // 图片路径
@@ -352,6 +354,7 @@ public class Main
         {
           inst.Display.localPath = settings.PicGifPath;
           inst.Display.Reload(true);
+          inst.IsLoaded = true;
           inst.ConfirmDelete = false;
         }
 
@@ -456,6 +459,22 @@ public class Main
         if (newShowDuringPlay != settings.ShowDuringPlay)
         {
           settings.ShowDuringPlay = newShowDuringPlay;
+          // If both modes were off and now one is on, trigger load
+          if (!inst.IsLoaded && (newShowDuringPlay || settings.ShowDuringNotPlay))
+          {
+            inst.Display.enabled = true;
+            inst.Display.Reload(true);
+            inst.IsLoaded = true;
+          }
+
+          // If both modes now off, unload
+          if (inst.IsLoaded && !newShowDuringPlay && !settings.ShowDuringNotPlay)
+          {
+            inst.Display.Unload();
+            inst.IsLoaded = false;
+            inst.GameObject.SetActive(false);
+          }
+
           changed = true;
         }
 
@@ -469,6 +488,22 @@ public class Main
         if (newShowDuringNotPlaying != settings.ShowDuringNotPlay)
         {
           settings.ShowDuringNotPlay = newShowDuringNotPlaying;
+          // If both modes were off and now one is on, trigger load
+          if (!inst.IsLoaded && (settings.ShowDuringPlay || newShowDuringNotPlaying))
+          {
+            inst.Display.enabled = true;
+            inst.Display.Reload(true);
+            inst.IsLoaded = true;
+          }
+
+          // If both modes now off, unload
+          if (inst.IsLoaded && !settings.ShowDuringPlay && !newShowDuringNotPlaying)
+          {
+            inst.Display.Unload();
+            inst.IsLoaded = false;
+            inst.GameObject.SetActive(false);
+          }
+
           changed = true;
         }
 
@@ -597,6 +632,7 @@ public class Main
 
     var display = go.AddComponent<Display>();
     display.rawImage = rawImage;
+    display.localPath = data.PicGifPath;
 
     var inst = new ImageInstance(data)
     {
@@ -618,8 +654,18 @@ public class Main
     };
     display.OnGifLoaded += inst.GifLoadedHandler;
 
-    display.localPath = data.PicGifPath;
-    // Start initial load directly via Start() instead of Reload() to avoid unnecessary cache force-refresh
+    // Determine if instance should load immediately based on visibility settings
+    var shouldLoad = data.ShowDuringPlay || data.ShowDuringNotPlay;
+    if (shouldLoad)
+    {
+      // Display.Start() will trigger LoadGif() automatically
+    }
+    else
+    {
+      // Both modes disabled: disable Display to prevent Start() from loading
+      display.enabled = false;
+      inst.IsLoaded = false;
+    }
 
     UpdateInstanceTransform(inst);
     Instances.Add(inst);
@@ -781,7 +827,9 @@ public class Main
         continue;
 
       var shouldShow = true;
-      if (inst.Display.isLoaded)
+      // Calculate effective visibility based on loaded state and game state
+      if (inst.Display.isLoaded ||
+          (!inst.IsLoaded && (inst.Settings.ShowDuringPlay || inst.Settings.ShowDuringNotPlay)))
         shouldShow = (inst.Settings.ShowDuringPlay && inst.Settings.ShowDuringNotPlay) ||
                      (inst.Settings.ShowDuringPlay && isGamePlaying) ||
                      (inst.Settings.ShowDuringNotPlay && !isGamePlaying);
@@ -791,12 +839,24 @@ public class Main
         inst.GameObject.SetActive(shouldShow);
         if (shouldShow)
         {
+          // Enable display component if it was disabled (both modes were off at creation)
+          if (!inst.Display.enabled)
+            inst.Display.enabled = true;
           inst.Display.Resume();
           // Lazy load: trigger loading when becoming visible
           if (!inst.IsLoaded)
           {
             inst.Display.Reload(true);
             inst.IsLoaded = true;
+          }
+        }
+        else
+        {
+          // Hidden: unload textures to free memory
+          if (inst.IsLoaded)
+          {
+            inst.Display.Unload();
+            inst.IsLoaded = false;
           }
         }
 

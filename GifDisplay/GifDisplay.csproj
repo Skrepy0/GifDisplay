@@ -513,7 +513,6 @@
         <Compile Include="UniGif\UniGifFormatter.cs"/>
     </ItemGroup>
     <ItemGroup>
-        <Content Include="UniGif\Example.meta"/>
         <Content Include="UniGif\UniGif.cs.meta"/>
         <Content Include="UniGif\UniGifConst.cs.meta"/>
         <Content Include="UniGif\UniGifDecoder.cs.meta"/>

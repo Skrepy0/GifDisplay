@@ -371,6 +371,30 @@ public class Display : MonoBehaviour
     _loadCoroutine = StartCoroutine(LoadGif());
   }
 
+  // ================= UNLOAD =================
+
+  public void Unload()
+  {
+    StopPlayback();
+
+    if (_loadCoroutine != null)
+    {
+      StopCoroutine(_loadCoroutine);
+      _loadCoroutine = null;
+    }
+
+    if (_gifTextures != null)
+      foreach (var tex in _gifTextures)
+        if (tex != null)
+          Destroy(tex);
+
+    _gifTextures = null;
+    _gifDelays = null;
+    _currentTexture = null;
+    _frameIndex = 0;
+    isLoaded = false;
+  }
+
   // ================= CACHE =================
 
   public static void RemoveCacheEntry(string key)
