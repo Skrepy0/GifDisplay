@@ -4,7 +4,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using System.Threading;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
@@ -36,7 +35,6 @@ public class Main
 
   private static bool loading;
   private static bool isReloading;
-  private static bool isPreviewLoading;
 
   private static readonly List<bool> ExpandedStates = new(); // 每个实例的展开状态
 
@@ -80,7 +78,6 @@ public class Main
     I18n.Load(entry.Path);
 
     loading = true;
-    isPreviewLoading = true;
     LoadSettings();
     loading = false;
 
@@ -89,10 +86,6 @@ public class Main
 
     UpdateGamePlayState();
     ApplyVisibilityRules();
-
-    // Wait for all preloads to complete before finishing initialization
-    // This ensures preloaded instances have their textures ready when entering game
-    canvasObject.GetComponent<MonoBehaviour>().StartCoroutine(WaitForPreloads());
 
     modEntry.Logger.Log($"Initial game playing state: {isGamePlaying}, instances: {Instances.Count}");
     modEntry.Logger.Log($"GifDisplay Mod loaded with {Instances.Count} instances");
@@ -134,8 +127,9 @@ public class Main
     stateUpdateCounter++;
     if (stateUpdateCounter % updateInterval == 0)
     {
+      var previousState = isGamePlaying;
       UpdateGamePlayState();
-      ApplyVisibilityRules();
+      if (previousState != isGamePlaying) ApplyVisibilityRules();
     }
   }
 
@@ -158,6 +152,7 @@ public class Main
     }
 
     Instances.Clear();
+    Display.Shutdown();
     if (canvasObject != null)
       Object.Destroy(canvasObject);
     return true;
@@ -464,13 +459,13 @@ public class Main
         {
           settings.ShowDuringPlay = newShowDuringPlay;
           // If both modes now off, unload
-          if (inst.IsLoaded && !newShowDuringPlay && !settings.ShowDuringNotPlay)
+          if ((inst.Display.isLoaded || inst.Display.isLoading) && !newShowDuringPlay && !settings.ShowDuringNotPlay)
           {
             inst.Display.Unload();
             inst.IsLoaded = false;
             inst.GameObject.SetActive(false);
           }
-          else if (inst.IsLoaded)
+          else if (inst.Display.isLoaded || inst.Display.isLoading)
           {
             // Already loaded - just let ApplyVisibilityRules handle show/hide
             // No reload needed!
@@ -479,7 +474,7 @@ public class Main
           {
             // Wasn't loaded before but now should be - trigger load
             inst.Display.enabled = true;
-            inst.Display.Reload(true);
+            inst.Display.Reload();
             inst.IsLoaded = true;
           }
 
@@ -498,13 +493,13 @@ public class Main
         {
           settings.ShowDuringNotPlay = newShowDuringNotPlaying;
           // If both modes now off, unload
-          if (inst.IsLoaded && !settings.ShowDuringPlay && !newShowDuringNotPlaying)
+          if ((inst.Display.isLoaded || inst.Display.isLoading) && !settings.ShowDuringPlay && !newShowDuringNotPlaying)
           {
             inst.Display.Unload();
             inst.IsLoaded = false;
             inst.GameObject.SetActive(false);
           }
-          else if (inst.IsLoaded)
+          else if (inst.Display.isLoaded || inst.Display.isLoading)
           {
             // Already loaded - just let ApplyVisibilityRules handle show/hide
             // No reload needed!
@@ -513,7 +508,7 @@ public class Main
           {
             // Wasn't loaded before but now should be - trigger load
             inst.Display.enabled = true;
-            inst.Display.Reload(true);
+            inst.Display.Reload();
             inst.IsLoaded = true;
           }
 
@@ -661,6 +656,7 @@ public class Main
     // Store event handler for proper cleanup
     inst.GifLoadedHandler = () =>
     {
+      inst.IsLoaded = inst.Display.isLoaded;
       UpdateInstanceTransform(inst);
       if (!loading && !isReloading)
         ApplyVisibilityRules();
@@ -678,185 +674,18 @@ public class Main
         // Only show during play: disable display but preload the GIF data
         display.enabled = false;
         inst.IsLoaded = false;
-        canvasObject.GetComponent<MonoBehaviour>().StartCoroutine(PreloadAndPreview(data.PicGifPath, display, inst));
+        display.BeginLoad();
       }
     }
     else
     {
       display.enabled = false;
       inst.IsLoaded = false;
-      canvasObject.GetComponent<MonoBehaviour>().StartCoroutine(LoadPreviewOnly(data.PicGifPath, display, inst));
+      display.BeginLoad(true);
     }
 
     UpdateInstanceTransform(inst);
     Instances.Add(inst);
-  }
-
-  private static IEnumerator WaitForPreloads()
-  {
-    // Wait until all preview/preload operations are complete
-    while (isPreviewLoading) yield return null;
-  }
-
-  private static IEnumerator PreloadAndPreview(string path, Display display, ImageInstance inst)
-  {
-    if (string.IsNullOrEmpty(path) || !File.Exists(path))
-    {
-      Helper.Log($"[{ModId}] Invalid path for preload: {path}");
-      isPreviewLoading = false;
-      yield break;
-    }
-
-    byte[] fileData = null;
-    Exception loadException = null;
-    var isDone = false;
-
-    // Async file loading on background thread
-    ThreadPool.QueueUserWorkItem(_ =>
-    {
-      try
-      {
-        fileData = File.ReadAllBytes(path);
-      }
-      catch (Exception ex)
-      {
-        loadException = ex;
-      }
-      finally
-      {
-        isDone = true;
-      }
-    });
-
-    yield return new WaitUntil(() => isDone);
-
-    if (loadException != null)
-    {
-      Helper.Log($"[{ModId}] Failed to preload: {loadException.Message}");
-      isPreviewLoading = false;
-      yield break;
-    }
-
-    var ext = Path.GetExtension(path).ToLowerInvariant();
-
-    // Handle static image: load texture, create preview, keep in _gifTextures
-    if (ext != ".gif")
-    {
-      var tex = new Texture2D(2, 2);
-      if (!tex.LoadImage(fileData))
-      {
-        Object.Destroy(tex);
-        isPreviewLoading = false;
-        yield break;
-      }
-
-      display.SetPreloadedTextures(new[] { tex }, new[] { 0.1f }, tex.width, tex.height);
-      display.CreatePreviewFromData(tex);
-      inst.IsLoaded = true;
-      isPreviewLoading = false;
-      yield break;
-    }
-
-    // Handle GIF: decode all frames and keep them ready
-    yield return UniGif.GetTextureListCoroutine(
-      fileData,
-      (textures, loopCount, width, height) =>
-      {
-        if (textures == null || textures.Count == 0 || display is null)
-        {
-          isPreviewLoading = false;
-          return;
-        }
-
-        var texArray = new Texture2D[textures.Count];
-        var delays = new float[textures.Count];
-
-        for (var i = 0; i < textures.Count; i++)
-        {
-          texArray[i] = textures[i].m_texture2d;
-          delays[i] = textures[i].m_delaySec;
-        }
-
-        display.SetPreloadedTextures(texArray, delays, width, height);
-        display.CreatePreviewFromData(texArray[0]);
-        inst.IsLoaded = true;
-        isPreviewLoading = false;
-      });
-  }
-
-  private static IEnumerator LoadPreviewOnly(string path, Display display, ImageInstance inst)
-  {
-    if (string.IsNullOrEmpty(path) || !File.Exists(path))
-    {
-      Helper.Log($"[{ModId}] Invalid path for preview: {path}");
-      isPreviewLoading = false;
-      yield break;
-    }
-
-    byte[] fileData = null;
-    Exception loadException = null;
-    var isDone = false;
-
-    // Async file loading on background thread
-    ThreadPool.QueueUserWorkItem(_ =>
-    {
-      try
-      {
-        fileData = File.ReadAllBytes(path);
-      }
-      catch (Exception ex)
-      {
-        loadException = ex;
-      }
-      finally
-      {
-        isDone = true;
-      }
-    });
-
-    yield return new WaitUntil(() => isDone);
-
-    if (loadException != null)
-    {
-      Helper.Log($"[{ModId}] Failed to load preview: {loadException.Message}");
-      isPreviewLoading = false;
-      yield break;
-    }
-
-    var ext = Path.GetExtension(path).ToLowerInvariant();
-
-    // Handle static image formats: create a small preview copy
-    if (ext != ".gif")
-    {
-      var tex = new Texture2D(2, 2);
-      if (!tex.LoadImage(fileData))
-      {
-        Object.Destroy(tex);
-        isPreviewLoading = false;
-        yield break;
-      }
-
-      display.CreatePreviewFromData(tex);
-      Object.Destroy(tex);
-      isPreviewLoading = false;
-      yield break;
-    }
-
-    // Handle GIF: decode first frame only for preview
-    yield return UniGif.GetTextureListCoroutine(
-      fileData,
-      (textures, loopCount, width, height) =>
-      {
-        if (textures == null || textures.Count == 0 || display is null)
-        {
-          isPreviewLoading = false;
-          return;
-        }
-
-        // Create preview from first frame only
-        display.CreatePreviewFromData(textures[0].m_texture2d);
-        isPreviewLoading = false;
-      });
   }
 
   // ---------- 更新实例排序 ----------
@@ -1014,13 +843,8 @@ public class Main
       if (ReferenceEquals(inst.GameObject, null) || ReferenceEquals(inst.Display, null))
         continue;
 
-      var shouldShow = true;
-      // Calculate effective visibility based on loaded state and game state
-      if (inst.Display.isLoaded ||
-          (!inst.IsLoaded && (inst.Settings.ShowDuringPlay || inst.Settings.ShowDuringNotPlay)))
-        shouldShow = (inst.Settings.ShowDuringPlay && inst.Settings.ShowDuringNotPlay) ||
-                     (inst.Settings.ShowDuringPlay && isGamePlaying) ||
-                     (inst.Settings.ShowDuringNotPlay && !isGamePlaying);
+      var shouldShow = (inst.Settings.ShowDuringPlay && isGamePlaying) ||
+                       (inst.Settings.ShowDuringNotPlay && !isGamePlaying);
 
       if (inst.GameObject.activeSelf != shouldShow)
       {
@@ -1030,20 +854,10 @@ public class Main
           // Enable display component if it was disabled (both modes were off at creation)
           if (!inst.Display.enabled)
             inst.Display.enabled = true;
-          inst.Display.Resume();
-          // Lazy load: trigger loading when becoming visible
-          // Note: if preloaded via PreloadAndPreview, textures are already set
-          if (!inst.IsLoaded)
-          {
-            // Textures were unloaded - need to reload
-            inst.Display.Reload(true);
-            inst.IsLoaded = true;
-          }
-          else if (inst.Display.isLoaded && !inst.Display.IsPlaying())
-          {
-            // Preloaded textures exist but playback hasn't started
-            inst.Display.StartPlayback();
-          }
+          if (!inst.Display.IsPlaying()) inst.Display.Resume();
+          if (!inst.Display.isLoaded && !inst.Display.isLoading)
+            inst.Display.BeginLoad();
+
         }
         // NOTE: When hiding due to game state change, we do NOT unload textures
         // This ensures instant resume when game state switches back
@@ -1099,7 +913,7 @@ public class Main
       if (root.TryGetValue("updateInterval", out var updateIntervalToken))
       {
         var val = updateIntervalToken.Value<int>();
-        updateInterval = val;
+        updateInterval = Math.Max(1, val);
       }
 
       if (root.TryGetValue("instances", out var instancesToken))

@@ -18,7 +18,7 @@ public static partial class UniGif
   /// <param name="gifData">ref GIF data</param>
   /// <param name="debugLog">Debug log flag</param>
   /// <returns>Result</returns>
-  private static bool SetGifData(byte[] gifBytes, ref GifData gifData, bool debugLog)
+  private static bool SetGifData(byte[] gifBytes, ref GifData gifData, bool debugLog, int maxFrames = int.MaxValue)
   {
     if (debugLog) Debug.Log("SetGifData Start.");
 
@@ -36,7 +36,7 @@ public static partial class UniGif
       return false;
     }
 
-    if (!SetGifBlock(gifBytes, ref byteIndex, ref gifData))
+    if (!SetGifBlock(gifBytes, ref byteIndex, ref gifData, maxFrames))
     {
       Debug.LogError("GIF block set error.");
       return false;
@@ -145,7 +145,7 @@ public static partial class UniGif
     return true;
   }
 
-  private static bool SetGifBlock(byte[] gifBytes, ref int byteIndex, ref GifData gifData)
+  private static bool SetGifBlock(byte[] gifBytes, ref int byteIndex, ref GifData gifData, int maxFrames)
   {
     try
     {
@@ -158,6 +158,7 @@ public static partial class UniGif
         {
           // Image Block(0x2c)
           SetImageBlock(gifBytes, ref byteIndex, ref gifData);
+          if (gifData.m_imageBlockList.Count >= maxFrames) break;
         }
         else if (gifBytes[nowIndex] == 0x21)
         {

@@ -4,6 +4,7 @@ Copyright (c) 2015 WestHillApps (Hironari Nishioka)
 This software is released under the MIT License.
 http://opensource.org/licenses/mit-license.php
 */
+// modified by Skrepy2233 in 2026/10/23
 
 using System;
 using System.Collections;
@@ -29,7 +30,9 @@ public static partial class UniGif
     Action<List<GifTexture>, int, int, int> callback,
     FilterMode filterMode = FilterMode.Bilinear,
     TextureWrapMode wrapMode = TextureWrapMode.Clamp,
-    bool debugLog = false)
+    bool debugLog = false,
+    int maxFrames = int.MaxValue,
+    Func<bool> cancelled = null)
   {
     var loopCount = -1;
     var width = 0;
@@ -37,7 +40,8 @@ public static partial class UniGif
 
     // Set GIF data
     var gifData = new GifData();
-    if (!SetGifData(bytes, ref gifData, debugLog))
+    if (cancelled != null && cancelled()) yield break;
+    if (!SetGifData(bytes, ref gifData, debugLog, maxFrames))
     {
       Debug.LogError("GIF file data set error.");
       if (callback != null) callback(null, loopCount, width, height);
@@ -46,7 +50,16 @@ public static partial class UniGif
 
     // Decode to textures from GIF data
     List<GifTexture> gifTexList = null;
-    yield return DecodeTextureCoroutine(gifData, result => gifTexList = result, filterMode, wrapMode);
+    yield return DecodeTextureCoroutine(gifData, result => gifTexList = result, filterMode, wrapMode, maxFrames,
+      cancelled);
+
+    if (cancelled != null && cancelled())
+    {
+      if (gifTexList != null)
+        foreach (var frame in gifTexList)
+          UnityEngine.Object.Destroy(frame.m_texture2d);
+      yield break;
+    }
 
     if (gifTexList == null || gifTexList.Count <= 0)
     {

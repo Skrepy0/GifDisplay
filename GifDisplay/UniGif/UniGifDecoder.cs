@@ -4,7 +4,7 @@ Copyright (c) 2015 WestHillApps (Hironari Nishioka)
 This software is released under the MIT License.
 http://opensource.org/licenses/mit-license.php
 */
-// modified by Skrepy2233 in 2026/8/29
+// modified by Skrepy2233 in 2026/10/23
 
 using System;
 using System.Collections;
@@ -40,62 +40,113 @@ public static partial class UniGif
   /// <param name="wrapMode">Textures wrap mode</param>
   /// <returns>IEnumerator</returns>
   private static IEnumerator DecodeTextureCoroutine(GifData gifData, Action<List<GifTexture>> callback,
-    FilterMode filterMode, TextureWrapMode wrapMode)
+    FilterMode filterMode, TextureWrapMode wrapMode, int maxFrames, Func<bool> cancelled)
   {
-    if (gifData.m_imageBlockList == null || gifData.m_imageBlockList.Count < 1) yield break;
-
-    var gifTexList = new List<GifTexture>(gifData.m_imageBlockList.Count);
-    var disposalMethodList = new List<ushort>(gifData.m_imageBlockList.Count);
-    // CPU-side pixel buffers to avoid GPU readback (GetPixels32) every frame
-    var cpuPixelBuffers = new List<Color32[]>();
-
-    var imgIndex = 0;
-    ImageBlock? prevImageBlock = null;
-
-    for (var i = 0; i < gifData.m_imageBlockList.Count; i++)
+    if (gifData.m_imageBlockList == null || gifData.m_imageBlockList.Count == 0) yield break;
+    var count = Math.Min(gifData.m_imageBlockList.Count, maxFrames);
+    var frames = new List<GifTexture>(count);
+    var width = (int)gifData.m_logicalScreenWidth;
+    var height = (int)gifData.m_logicalScreenHeight;
+    var pixels = new Color32[checked(width * height)];
+    Color32[] restore = null;
+    ushort previousDisposal = 0;
+    ImageBlock? previousBlock = null;
+    var transferred = false;
+    Texture2D pending = null;
+    var timer = System.Diagnostics.Stopwatch.StartNew();
+    try
     {
-      var imageBlock = gifData.m_imageBlockList[i];
-      var decodedData = GetDecodedData(imageBlock);
+      for (var i = 0; i < count; i++)
+      {
+        if (cancelled != null && cancelled()) yield break;
+        var block = gifData.m_imageBlockList[i];
+        var control = GetGraphicCtrlExt(gifData, i);
+        var transparent = GetTransparentIndex(control);
+        Color32 background;
+        var palette = GetColorTableAndSetBgColor(gifData, block, transparent, out background);
+        var clear = ForceDisposeToTransparent ? TransparentColor : background;
+        if (i == 0) FillPixels(pixels, clear);
+        else if (previousDisposal == 2 && previousBlock.HasValue)
+          ClearRegion(pixels, width, height, previousBlock.Value, clear);
+        else if (previousDisposal == 3 && restore != null)
+          Array.Copy(restore, pixels, pixels.Length);
 
-      var graphicCtrlEx = GetGraphicCtrlExt(gifData, imgIndex);
+        var disposal = GetDisposalMethod(control);
+        if (disposal == 3)
+        {
+          if (restore == null) restore = new Color32[pixels.Length];
+          Array.Copy(pixels, restore, pixels.Length);
+        }
 
-      var transparentIndex = GetTransparentIndex(graphicCtrlEx);
+        var decoded = GetDecodedData(block);
+        // Visit only the changed rectangle, keeping source offsets valid when clipped.
+        for (var row = 0; row < block.m_imageHeight; row++)
+        {
+          var y = height - 1 - (block.m_imageTopPosition + row);
+          if (y >= 0 && y < height)
+          {
+            var left = Math.Max(0, (int)block.m_imageLeftPosition);
+            var right = Math.Min(width, block.m_imageLeftPosition + block.m_imageWidth);
+            var src = row * block.m_imageWidth + left - block.m_imageLeftPosition;
+            for (var x = left; x < right && src < decoded.Length; x++, src++)
+            {
+              var index = decoded[src];
+              if (index != transparent && palette != null && index < palette.Length)
+                pixels[y * width + x] = palette[index];
+            }
+          }
+          if ((row & 31) == 31 && timer.Elapsed.TotalMilliseconds >= 2)
+          {
+            yield return null;
+            timer.Restart();
+            if (cancelled != null && cancelled()) yield break;
+          }
+        }
 
-      disposalMethodList.Add(GetDisposalMethod(graphicCtrlEx));
-
-      Color32 bgColor;
-      var colorTable = GetColorTableAndSetBgColor(gifData, imageBlock, transparentIndex, out bgColor);
-
-      bool filledTexture;
-      Color32[] pixelBuffer;
-      var tex = CreateTexture2D(gifData, cpuPixelBuffers, imgIndex, disposalMethodList, bgColor, filterMode, wrapMode,
-        out filledTexture, prevImageBlock, out pixelBuffer);
-
-      // Compose frame into pixelBuffer (single upload after loop)
-      var dataIndex = 0;
-      // Reverse set pixels. because GIF data starts from the top left.
-      for (var y = tex.height - 1; y >= 0; y--)
-        WriteTexturePixelRow(pixelBuffer, tex.width, tex.height, y, imageBlock, decodedData, ref dataIndex, colorTable,
-          bgColor, transparentIndex, filledTexture);
-
-      tex.SetPixels32(pixelBuffer);
-      tex.Apply();
-
-      // Store CPU-side copy for next frame compositing (avoids GPU readback)
-      cpuPixelBuffers.Add(pixelBuffer);
-
-      var delaySec = GetDelaySec(graphicCtrlEx);
-
-      // Add to GIF texture list
-      gifTexList.Add(new GifTexture(tex, delaySec));
-
-      prevImageBlock = imageBlock;
-      imgIndex++;
+        pending = new Texture2D(width, height, TextureFormat.ARGB32, false);
+        pending.filterMode = filterMode;
+        pending.wrapMode = wrapMode;
+        pending.SetPixels32(pixels);
+        pending.Apply(false, true);
+        frames.Add(new GifTexture(pending, GetDelaySec(control)));
+        pending = null;
+        previousDisposal = disposal;
+        previousBlock = block;
+        if (timer.Elapsed.TotalMilliseconds >= 2 && i + 1 < count)
+        {
+          yield return null;
+          timer.Restart();
+        }
+      }
+      if (callback != null)
+      {
+        callback(frames);
+        transferred = true;
+      }
     }
+    finally
+    {
+      if (pending != null) UnityEngine.Object.Destroy(pending);
+      if (!transferred)
+        foreach (var frame in frames) UnityEngine.Object.Destroy(frame.m_texture2d);
+    }
+  }
 
-    if (callback != null) callback(gifTexList);
+  private static void FillPixels(Color32[] pixels, Color32 color)
+  {
+    if (color.a == 0 && color.r == 0 && color.g == 0 && color.b == 0)
+      Array.Clear(pixels, 0, pixels.Length);
+    else
+      for (var i = 0; i < pixels.Length; i++) pixels[i] = color;
+  }
 
-    yield break;
+  private static void ClearRegion(Color32[] pixels, int width, int height, ImageBlock block, Color32 color)
+  {
+    var right = Math.Min(width, block.m_imageLeftPosition + block.m_imageWidth);
+    var bottom = Math.Min(height, block.m_imageTopPosition + block.m_imageHeight);
+    for (var row = (int)block.m_imageTopPosition; row < bottom; row++)
+      for (var x = (int)block.m_imageLeftPosition; x < right; x++)
+        pixels[(height - 1 - row) * width + x] = color;
   }
 
   #region Call from DecodeTexture methods
@@ -206,186 +257,6 @@ public static partial class UniGif
     if (method == 0) method = 1;
 
     return method;
-  }
-
-  /// <summary>
-  ///   Create Texture2D object and initial pixel buffer (no GPU upload yet)
-  /// </summary>
-  private static Texture2D CreateTexture2D(GifData gifData, List<Color32[]> cpuPixelBuffers, int imgIndex,
-    List<ushort> disposalMethodList, Color32 bgColor, FilterMode filterMode, TextureWrapMode wrapMode,
-    out bool filledTexture, ImageBlock? prevImageBlock, out Color32[] pixelBuffer)
-  {
-    filledTexture = false;
-
-    // Create texture
-    var tex = new Texture2D(gifData.m_logicalScreenWidth, gifData.m_logicalScreenHeight, TextureFormat.ARGB32, false);
-    tex.filterMode = filterMode;
-    tex.wrapMode = wrapMode;
-
-    pixelBuffer = new Color32[tex.width * tex.height];
-
-    // Check dispose
-    var prevDisposal = imgIndex > 0 ? disposalMethodList[imgIndex - 1] : (ushort)2;
-    var useBeforeIndex = -1;
-
-    if (imgIndex == 0)
-    {
-      // Initial canvas: fill either background color or transparent
-      var baseFill = ForceDisposeToTransparent
-        ? TransparentColor
-        : bgColor;
-      for (var i = 0; i < pixelBuffer.Length; i++) pixelBuffer[i] = baseFill;
-      filledTexture = true;
-      return tex;
-    }
-
-    if (prevDisposal == 1)
-    {
-      // Do not dispose
-      useBeforeIndex = imgIndex - 1;
-    }
-    else if (prevDisposal == 2)
-    {
-      // Restore to background
-      useBeforeIndex = imgIndex - 1;
-    }
-    else if (prevDisposal == 3)
-    {
-      // 3 (Restore to previous)
-      for (var i = imgIndex - 2; i >= 0; i--)
-        if (disposalMethodList[i] == 1)
-        {
-          useBeforeIndex = i;
-          break;
-        }
-
-      if (useBeforeIndex < 0)
-      {
-        var fill = ForceDisposeToTransparent ? TransparentColor : bgColor;
-        for (var i = 0; i < pixelBuffer.Length; i++) pixelBuffer[i] = fill;
-        filledTexture = true;
-        return tex;
-      }
-    }
-    else
-    {
-      // Treat as restore to background
-      var fill = ForceDisposeToTransparent ? TransparentColor : bgColor;
-      for (var i = 0; i < pixelBuffer.Length; i++) pixelBuffer[i] = fill;
-      filledTexture = true;
-      return tex;
-    }
-
-    if (useBeforeIndex >= 0)
-    {
-      filledTexture = true;
-      // Use CPU-side pixel buffer instead of GPU readback (GetPixels32)
-      var prevPix = cpuPixelBuffers[useBeforeIndex];
-      Array.Copy(prevPix, pixelBuffer, prevPix.Length);
-
-      // Disposal 2: clear only previous frame rect
-      if (prevDisposal == 2 && prevImageBlock.HasValue)
-      {
-        var prev = prevImageBlock.Value;
-        int left = prev.m_imageLeftPosition;
-        int top = prev.m_imageTopPosition;
-        int width = prev.m_imageWidth;
-        int height = prev.m_imageHeight;
-
-        var clearColor = ForceDisposeToTransparent ? TransparentColor : bgColor;
-
-        for (var row = 0; row < height; row++)
-        {
-          var gifYFromTop = top + row;
-          var unityY = tex.height - 1 - gifYFromTop;
-          if (unityY < 0 || unityY >= tex.height) continue;
-
-          var baseIndex = unityY * tex.width;
-          for (var col = 0; col < width; col++)
-          {
-            var unityX = left + col;
-            if (unityX < 0 || unityX >= tex.width) continue;
-            pixelBuffer[baseIndex + unityX] = clearColor;
-          }
-        }
-      }
-    }
-
-    return tex;
-  }
-
-  /// <summary>
-  ///   Write one texture row into pixel buffer (no immediate GPU call)
-  /// </summary>
-  private static void WriteTexturePixelRow(Color32[] pixels, int texWidth, int texHeight, int y, ImageBlock imgBlock,
-    byte[] decodedData, ref int dataIndex, Color32[] colorTable, Color32 bgColor, int transparentIndex,
-    bool filledTexture)
-  {
-    // Row no (0~)
-    var row = texHeight - 1 - y;
-
-    // Check if row is within image block bounds
-    var rowInImage = row >= imgBlock.m_imageTopPosition &&
-                     row < imgBlock.m_imageTopPosition + imgBlock.m_imageHeight;
-    int imgLeft = imgBlock.m_imageLeftPosition;
-    var imgRight = imgBlock.m_imageLeftPosition + imgBlock.m_imageWidth;
-
-    for (var x = 0; x < texWidth; x++)
-    {
-      // Out of image blocks
-      if (!rowInImage || x < imgLeft || x >= imgRight)
-      {
-        // Get pixel color from bg color
-        if (!filledTexture) pixels[y * texWidth + x] = ForceDisposeToTransparent ? TransparentColor : bgColor;
-        continue;
-      }
-
-      // Out of decoded data
-      if (dataIndex >= decodedData.Length)
-      {
-        if (!filledTexture)
-        {
-          pixels[y * texWidth + x] = ForceDisposeToTransparent ? TransparentColor : bgColor;
-          if (dataIndex == decodedData.Length) Debug.LogError("dataIndex exceeded decodedData. index:" + dataIndex);
-        }
-
-        dataIndex++;
-        continue;
-      }
-
-      // Get pixel color from color table
-      var colorIndex = decodedData[dataIndex];
-      if (colorTable == null || colorTable.Length <= colorIndex)
-      {
-        if (!filledTexture)
-        {
-          pixels[y * texWidth + x] = ForceDisposeToTransparent ? TransparentColor : bgColor;
-          if (colorTable == null)
-            Debug.LogError("colorIndex exceeded the size of colorTable. colorTable is null. colorIndex:" +
-                           colorIndex);
-          else
-            Debug.LogError("colorIndex exceeded the size of colorTable. colorTable.Count:" + colorTable.Length +
-                           " colorIndex:" + colorIndex);
-        }
-
-        dataIndex++;
-        continue;
-      }
-
-      // Set alpha
-      var isTransparent = transparentIndex >= 0 && transparentIndex == colorIndex;
-
-      // If transparent and we already have previous composite -> keep underlying pixel
-      if (!(filledTexture && isTransparent))
-      {
-        // Fast path: direct Color32 lookup from pre-converted table
-        var c = colorTable[colorIndex];
-        if (isTransparent) c.a = 0;
-        pixels[y * texWidth + x] = c;
-      }
-
-      dataIndex++;
-    }
   }
 
   #endregion
@@ -530,35 +401,16 @@ public static partial class UniGif
   private static byte[] SortInterlaceGifData(byte[] decodedData, int xNum)
   {
     var newArr = new byte[decodedData.Length];
-    var dataIndex = 0;
-    var totalRows = decodedData.Length / xNum;
-
-    // Interlace pattern: rows are grouped in 4 passes
-    // Pass 1: every 8th row starting at 0
-    // Pass 2: every 8th row starting at 4
-    // Pass 3: every 4th row starting at 2
-    // Pass 4: every 2nd row starting at 1
-    // Single pass: for each row, determine which pass it belongs to
-    for (var row = 0; row < totalRows; row++)
-    {
-      // Determine if this row is active in current pass logic
-      int pass;
-      if (row % 8 == 0)
-        pass = 1;
-      else if (row % 8 == 4)
-        pass = 2;
-      else if (row % 4 == 2)
-        pass = 3;
-      else if (row % 2 == 1)
-        pass = 4;
-      else
-        continue; // Should not happen for valid GIF
-
-      // Calculate source index for this row
-      var srcOffset = row * xNum;
-      Buffer.BlockCopy(decodedData, srcOffset, newArr, dataIndex, xNum);
-      dataIndex += xNum;
-    }
+    var source = 0;
+    var rows = decodedData.Length / xNum;
+    var starts = new[] { 0, 4, 2, 1 };
+    var strides = new[] { 8, 8, 4, 2 };
+    for (var pass = 0; pass < starts.Length; pass++)
+      for (var row = starts[pass]; row < rows; row += strides[pass])
+      {
+        Buffer.BlockCopy(decodedData, source, newArr, row * xNum, xNum);
+        source += xNum;
+      }
 
     return newArr;
   }
